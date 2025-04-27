@@ -1,0 +1,20 @@
+{
+    "name": "JSONWebsocket",
+    "keywords": "websocket, feather, socket",
+    "description": "Arduino library for AdafruitFeather Websocket Server Communication",
+    "repository":
+    {
+        "type": "git",
+        "url": "https://github.com/The-Hybrid-Atelier/JSONWebsocket.git"
+    },
+    "authors":
+    {
+        "name": "Cesar Torres",
+        "url": "http://www.cearto.com",
+        "maintainer": true
+    },
+    "version": "0.1.1",
+    "license": "MIT",
+    "frameworks": "arduino",
+    "platforms": "*"
+}
