@@ -15,32 +15,24 @@ import pywt
 # For visualization, dataframe should have a condition column (e.g., 'material', etc.).
 
 def plot_lines_by_condition(df, pulse_col, condition_col):
+ def plot_lines_by_condition(df, pulse_col, condition_col):
     """
     Plot all padded pulses as lines, grouped by condition.
-
-    Parameters:
-    - df: DataFrame with 'pulse_col' as arrays and a 'condition' column.
-    - pulse_col: Column with padded arrays (e.g., 'padded_pulse').
-    - condition_col: Column for grouping (e.g., 'material', 'stirrer type', etc.).
     """
-    # Stack all padded arrays into a 2D matrix (rows = trials, cols = time steps)
     pulse_matrix = np.vstack(df[pulse_col].to_numpy())
     n_trials, pulse_length = pulse_matrix.shape
 
-    # Build the long-form DataFrame for plotting
     plot_df = pd.DataFrame({
-        'value': pulse_matrix.flatten() / 1000,  # Convert to kPa
+        'value': pulse_matrix.flatten() / 1000,
         'time_index': np.tile(np.arange(pulse_length), n_trials),
         'condition': np.repeat(df[condition_col].values, pulse_length)
     })
 
-    # Plot setup
     sns.set(style="whitegrid", context="talk")
     unique_conditions = plot_df["condition"].unique()
     palette = sns.color_palette("Set2", len(unique_conditions))
 
-    # Lineplot with error band per condition
-    plt.figure(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
     sns.lineplot(
         data=plot_df,
         x='time_index',
@@ -48,18 +40,18 @@ def plot_lines_by_condition(df, pulse_col, condition_col):
         hue='condition',
         linewidth=3,
         errorbar='sd',
-        palette=palette
+        palette=palette,
+        ax=ax
     )
 
-    # Aesthetic tweaks
-    plt.xlabel("Sample", fontsize=16)
-    plt.ylabel("Air Pressure (kPa)", fontsize=16)
-    plt.xticks(fontsize=14)
-    plt.yticks(fontsize=14)
-    plt.legend(title="Condition", fontsize=14, title_fontsize=16)
-    plt.tight_layout()
-    plt.show()
-    return plt
+    ax.set_xlabel("Sample", fontsize=16)
+    ax.set_ylabel("Air Pressure (kPa)", fontsize=16)
+    ax.tick_params(labelsize=14)
+    ax.legend(title="Condition", fontsize=14, title_fontsize=16)
+
+    fig.tight_layout()
+    return fig, ax 
+
 
 def median_filter(data, kernel_size=5):
     """Apply a median filter to the data."""
