@@ -59,6 +59,7 @@ def plot_lines_by_condition(df, pulse_col, condition_col):
     plt.legend(title="Condition", fontsize=14, title_fontsize=16)
     plt.tight_layout()
     plt.show()
+    return plt
 
 def median_filter(data, kernel_size=5):
     """Apply a median filter to the data."""
