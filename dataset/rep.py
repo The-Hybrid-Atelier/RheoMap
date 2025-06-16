@@ -14,7 +14,7 @@ import pywt
 # Dataframe should have a column with pulses (e.g., must be equal length). 
 # For visualization, dataframe should have a condition column (e.g., 'material', etc.).
 
-class REP:
+class rep:
     @staticmethod
     def plot_lines_by_condition(df, pulse_col, condition_col):
         """
