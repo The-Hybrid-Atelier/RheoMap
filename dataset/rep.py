@@ -146,3 +146,35 @@ def extract_features(pulse):
     }
     # return resp
     return resp["values"]
+
+def extract_features_nocv(stack, set="vuong"):
+    """
+    Extracts a feature vector from a vuong_sv_stack (k x n).
+
+    Parameters:
+    - stack: np.ndarray of shape (k, n)
+    - set: 'vuong' or 'matnoise' to determine which feature set to extract
+
+    Returns:
+    - feature_vector: np.ndarray of shape depending on the set
+    """
+    if set == "vuong":
+        means = np.mean(stack, axis=0)
+        features = [means]
+
+
+    elif set == "matnoise":
+        means = np.mean(stack, axis=0)
+        stds = np.std(stack, axis=0)
+        medians = np.median(stack, axis=0)
+        mins = np.min(stack, axis=0)
+        maxs = np.max(stack, axis=0)
+        ranges = maxs - mins
+
+
+        features = [means, stds, medians, mins, maxs, ranges]
+
+    else:
+        raise ValueError(f"Unknown feature set '{set}'. Choose 'vuong' or 'matnoise'.")
+
+    return np.concatenate(features)
