@@ -178,3 +178,82 @@ def extract_features_nocv(stack, set="vuong"):
         raise ValueError(f"Unknown feature set '{set}'. Choose 'vuong' or 'matnoise'.")
 
     return np.concatenate(features)
+
+
+def stack_reps(df, data_col='data', group_size=3, keep_cols=None, material=None, 
+               extract_features=True, feature_sets=['matnoise', 'vuong']):
+    """
+    Stack REPs by grouping rows and create feature vectors.
+    
+    Parameters:
+    - df: DataFrame with pulse data
+    - data_col: Name of column containing pulse arrays (default: 'data')
+    - group_size: Number of rows to stack together (default: 3)
+    - keep_cols: List of column names to keep from first row of each group (default: ['name'])
+    - material: Optional material label to add to output (default: None)
+    - extract_features: Whether to extract features from stacked data (default: True)
+    - feature_sets: List of feature sets to extract, options: 'matnoise', 'vuong' (default: both)
+    
+    Returns:
+    - DataFrame with stacked data and optional features
+    
+    Example:
+        # Basic usage - stack every 3 rows
+        df_stacked = rep.stack_reps(df)
+        
+        # Stack with material label
+        df_stacked = rep.stack_reps(df, material='plaster')
+        
+        # Stack without feature extraction
+        df_stacked = rep.stack_reps(df, extract_features=False)
+        
+        # Stack every 5 rows with only 'vuong' features
+        df_stacked = rep.stack_reps(df, group_size=5, feature_sets=['vuong'])
+        
+        # Keep additional columns and specify material later
+        df_stacked = rep.stack_reps(df, keep_cols=['name', 'trial_id'])
+        df_stacked['material'] = 'plaster'  # Add material later
+    """
+    if keep_cols is None:
+        keep_cols = ['name']
+    
+    grouped_data = []
+    
+    # Group by specified group_size and stack the data column
+    for i in range(0, len(df), group_size):
+        group = df.iloc[i:i+group_size]
+        
+        if len(group) == group_size:  # Ensure we have full groups
+            # Stack the data arrays
+            stacked_data = np.stack(group[data_col].values)
+            
+            # Create result dictionary with stacked data
+            result = {data_col: stacked_data}
+            
+            # Keep specified columns from the first row of the group
+            for col in keep_cols:
+                if col in group.columns:
+                    result[col] = group.iloc[0][col]
+            
+            grouped_data.append(result)
+    
+    # Create new dataframe with stacked data
+    df_stacked = pd.DataFrame(grouped_data)
+    
+    # Add material column if specified
+    if material is not None:
+        df_stacked['material'] = material
+    
+    # Extract features if requested
+    if extract_features:
+        if 'matnoise' in feature_sets:
+            df_stacked['fluctuation_fv'] = df_stacked[data_col].apply(
+                lambda x: extract_features_nocv(x, "matnoise")
+            )
+        
+        if 'vuong' in feature_sets:
+            df_stacked['geo_fv'] = df_stacked[data_col].apply(
+                lambda x: extract_features_nocv(x, "vuong")
+            )
+    
+    return df_stacked
