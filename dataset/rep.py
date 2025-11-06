@@ -552,7 +552,8 @@ def process_rep_data(df, dtw_k=3.0, stack_k=3, cluster_seconds=10, verbose=True)
     
     if verbose:
         print(f"  Created {len(stacked_df)} stacks")
-        print(f"  data_stack: ({stack_k}, {df_filt['data'].iloc[0].shape[0]})")
+        data_len = len(df_filt['data'].iloc[0]) if len(df_filt) > 0 else 0
+        print(f"  data_stack: ({stack_k}, {data_len})")
         print(f"  geom_stack: ({stack_k}, 12)")
         print(f"  geo_fv: (12,), fluct_fv: (72,)")
     
