@@ -277,74 +277,6 @@ def extract_timestamp_from_id(df):
     return df
 
 
-def _as_1d(x):
-    """Convert to 1D array."""
-    a = np.asarray(x, dtype=float)
-    a = np.squeeze(a)
-    if a.ndim > 1:
-        a = a.ravel()
-    if a.ndim != 1:
-        raise ValueError(f"Sequence not 1-D after squeeze: shape={a.shape}")
-    return a
-
-
-def detect_outliers_dtw(df, method="mad", k=3.0, pct=90, verbose=True):
-    """DTW outlier detection on 'data' column."""
-    seqs = [_as_1d(x) for x in df['data'].values]
-    
-    lens = [len(s) for s in seqs]
-    Lset = sorted(set(lens))
-    if len(Lset) != 1:
-        raise ValueError(f"Sequences not equal length: found lengths {Lset}")
-    
-    arrs = np.vstack([s for s in seqs])
-    ref = np.median(arrs, axis=0)
-    
-    dist_scalar = lambda a, b: abs(a - b)
-    
-    dists = np.empty(len(seqs), dtype=float)
-    for i, s in enumerate(seqs):
-        d, _ = fastdtw(s, ref, dist=dist_scalar)
-        dists[i] = d
-    
-    if method == "mad":
-        med = np.median(dists)
-        mad = np.median(np.abs(dists - med)) + 1e-12
-        thr = med + k * mad
-    elif method == "percentile":
-        thr = np.percentile(dists, pct)
-    else:
-        raise ValueError("method must be 'mad' or 'percentile'")
-    
-    keep = dists <= thr
-    
-    if verbose:
-        print(f"DTW: kept {int(keep.sum())}/{len(keep)}, dropped {int((~keep).sum())}, threshold={thr:.3f}")
-    
-    return dists, thr, keep
-
-
-def expand_drop_to_clusters(df, bad_mask, seconds=10):
-    """Expand bad mask to time clusters within same 'name' group."""
-    if not np.issubdtype(df['Time_Stamp'].dtype, np.datetime64):
-        df = df.copy()
-        df['Time_Stamp'] = pd.to_datetime(df['Time_Stamp'])
-    
-    expanded = pd.Series(False, index=df.index)
-    delta = pd.Timedelta(seconds=seconds)
-    
-    bad_idx = np.where(bad_mask)[0]
-    for i in bad_idx:
-        nm = df.iloc[i]['name']
-        ts = df.iloc[i]['Time_Stamp']
-        in_cluster = (
-            (df['name'] == nm) &
-            (df['Time_Stamp'].between(ts - delta, ts + delta))
-        )
-        expanded |= in_cluster
-    
-    return expanded.values
-
 
 def iqr_outlier_filter(df, verbose=True):
     """IQR outlier filtering by 'name' group on feature vectors."""
@@ -573,3 +505,271 @@ def process_rep_data(df, dtw_k=3.0, stack_k=3, cluster_seconds=10, verbose=True)
         print(f"Materials: {df_final['name'].unique().tolist()}")
     
     return df_final
+
+
+## Functions above this likne are too verbose, I'm not sure I can follow process_rep_data() for example
+##===================================================================================================
+## Marwan's Notebook functions
+##===================================================================================================
+def _as_1d(x):
+    a = np.asarray(x, dtype=float)
+    a = np.squeeze(a)
+    if a.ndim > 1:
+        a = a.ravel()
+    if a.ndim != 1:
+        raise ValueError(f"Sequence not 1-D after squeeze: shape={a.shape}")
+    return a
+
+def detect_outliers_dtw_equal_len(df, data_col="data", method="mad", k=3.0, pct=90, verbose=True):
+    """
+    DTW outlier detection assuming equal-length 1-D sequences in df[data_col].
+    Uses scalar-safe distance |a-b| to avoid scipy.euclidean 1-D checks.
+    Returns: dists (np.ndarray), threshold (float), keep_mask (np.ndarray[bool])
+    """
+    # Canonicalize to 1-D arrays
+    seqs = [ _as_1d(x) for x in df[data_col].values ]
+
+    # Verify equal lengths
+    lens = [len(s) for s in seqs]
+    Lset = sorted(set(lens))
+    if len(Lset) != 1:
+        raise ValueError(f"Sequences not equal length: found lengths {Lset}. "
+                         "Make them uniform first (trim/pad/drop).")
+
+    # Reference = median curve
+    arrs = np.vstack([s for s in seqs])  # (n, L)
+    ref = np.median(arrs, axis=0)
+
+    # Scalar-safe distance
+    dist_scalar = lambda a, b: abs(a - b)
+
+    # DTW distances
+    dists = np.empty(len(seqs), dtype=float)
+    for i, s in enumerate(seqs):
+        d, _ = fastdtw(s, ref, dist=dist_scalar)
+        dists[i] = d
+
+    # Threshold
+    if method == "mad":
+        med = np.median(dists)
+        mad = np.median(np.abs(dists - med)) + 1e-12
+        thr = med + k * mad
+    elif method == "percentile":
+        thr = np.percentile(dists, pct)
+    else:
+        raise ValueError("method must be 'mad' or 'percentile'")
+
+    keep = dists <= thr
+
+    if verbose:
+        print(f"DTW filter → kept {int(keep.sum())}/{len(keep)} "
+              f"(dropped {int((~keep).sum())}); threshold={thr:.3f}")
+        for j in np.where(~keep)[0]:
+            print(f"Outlier at positional index {j} (DTW={dists[j]:.2f})")
+
+    return dists, thr, keep
+
+
+#@title Plotting Function (Seaborn)
+def plot_pulse_by_name_sns(dataframe):
+    unique_materials = dataframe['name'].unique().copy()
+
+    for material in unique_materials:
+        # Filter for this material only
+        material_data = dataframe[dataframe['name'] == material].reset_index()#assigns index as a column now
+
+        # Explode data into long-form
+        long_df = (
+            material_data[['index', 'data']]
+            .explode('data')
+            .assign(time_idx=lambda d: d.groupby('index').cumcount())  # x-axis
+            #each element as its own row,same list means same index number.
+            #but now the index of each element is distinguished by time_idx.
+            .rename(columns={'index': 'trial'})
+        )
+        long_df['data'] = long_df['data'] / 1000  # Convert Pa to kPa
+
+        # Plot using seaborn
+        from matplotlib.cm import get_cmap
+        from matplotlib.colors import to_hex,LinearSegmentedColormap
+
+        unique_trials = long_df['trial'].unique()
+        num_trials = len(unique_trials)
+
+        # Define red → yellow → blue colormap
+        tricolor_cmap = LinearSegmentedColormap.from_list("red_yellow_blue", ["#ff0000", "#ffff00", "#0000ff"], N=num_trials)
+        colors = [to_hex(tricolor_cmap(i / (num_trials - 1))) for i in range(num_trials)]
+
+        # Create palette mapping
+        palette = dict(zip(unique_trials, colors))
+
+        # Plot
+        plt.figure(figsize=(12, 6))
+        sns.lineplot(
+            data=long_df,
+            x='time_idx',
+            y='data',
+            hue='trial',
+            palette=palette,
+            linewidth=1.5,
+            alpha=0.9,
+            hue_order=unique_trials
+        )
+        plt.title(f"Pulses for Material: {material}")
+        plt.xlabel("Discrete-Time, index (n)")
+        plt.ylabel("Pulse Value (KPa)")
+        plt.legend(title='Trial', bbox_to_anchor=(1.15, 1), loc='upper left')
+        plt.figure(figsize=(14, 8))  # more space for layout
+        plt.tight_layout()
+        plt.show()
+
+
+
+#drop cluster function for DTW
+def expand_drop_to_clusters(df, bad_mask, group_col="name", time_col="Time_Stamp", seconds=10):
+    """
+    Expand per-row 'bad' mask to include any rows within ±seconds
+    of each bad row, but only within the same group (name).
+    Returns an expanded boolean mask aligned to df.index.
+    """
+    if not np.issubdtype(df[time_col].dtype, np.datetime64):
+        df = df.copy()
+        df[time_col] = pd.to_datetime(df[time_col])
+
+    expanded = pd.Series(False, index=df.index)
+    delta = pd.Timedelta(seconds=seconds)
+
+    bad_idx = np.where(bad_mask)[0]
+    for i in bad_idx:
+        nm = df.iloc[i][group_col]
+        ts = df.iloc[i][time_col]
+        in_cluster = (
+            (df[group_col] == nm) &
+            (df[time_col].between(ts - delta, ts + delta))
+        )
+        expanded |= in_cluster
+
+    return expanded.values
+
+
+#usecase stacked_df = generate_stacked_dataset_triplets(df_clean_filt, k=3, group_cols=["name", "clayBody"])
+
+def generate_stacked_dataset_triplets(df, k=3, group_cols=('name', 'clayBody')):
+    """
+    Groups by `group_cols`, splits into triplets, and stacks:
+      - 'vuong_sv' -> (k, n)
+      - 'data' -> (k, m)
+      - 'Relative_time_elapsed (s)' -> (k,)
+      - 'Time_Elapsed (s)' -> (k,)              # global time
+      - 'Trial' -> (k,)
+    """
+    print(f"Original dataset has {len(df)} rows.")
+    out = []
+
+    for gvals, g in df.groupby(list(group_cols), sort=False):
+        g = g.reset_index(drop=True)
+        num_triplets = len(g) // k
+
+        for i in range(num_triplets):
+            trip = g.iloc[i*k:(i+1)*k]
+
+            row = {col: val for col, val in zip(group_cols, gvals)}
+            row['vuong_sv_stack'] = np.vstack(trip['vuong_sv'].values)
+            row['data_stack']     = np.vstack(trip['data'].values)
+            row['time_stack_rel'] = trip['Relative_time_elapsed (s)'].to_numpy()
+            row['time_stack_glb'] = trip['Time_Elapsed (s)'].to_numpy()
+            row['trial_stack']    = trip['trial'].to_numpy()
+            if model_type == 'WaterLoss':
+                row['avg_weight']        = trip['estimated_weight'].mean()
+                loss_col = 'estimated_water_loss (g)' if 'estimated_water_loss (g)' in trip.columns else 'estimated_water_loss'
+                row['avg_water_loss'] = trip[loss_col].mean()
+
+            out.append(row)
+
+    new_df = pd.DataFrame(out)
+    print(f"New dataset has {len(new_df)} triplets after stacking.")
+    return new_df
+
+def triplets_extract_features(df_clean_filt):
+    stacked_df = generate_stacked_dataset_triplets(df_clean_filt, k=3, group_cols=["name", "clayBody"])
+    # 1. Apply both feature extraction functions first
+    stacked_df['vuong_fv'] = stacked_df['vuong_sv_stack'].apply(
+        lambda x: extract_features_nocv(x, "vuong")
+    )
+
+    stacked_df['matnoise_fv'] = stacked_df['vuong_sv_stack'].apply(
+        lambda x: extract_features_nocv(x, "matnoise")
+    )
+
+    # # 3. Now it's safe to check shapes
+    stacked_df['vuong_fv'][0].shape, stacked_df['matnoise_fv'][0].shape
+    print(stacked_df)
+
+    # Suppose your feature column is named "matnoise_fv" and stores arrays
+    has_nan = stacked_df["matnoise_fv"].apply(lambda arr: np.isnan(arr).any())
+
+    print("Rows with NaN in matnoise_fv:", has_nan.sum())
+
+    return stacked_df
+
+
+def iqr_outlier_filter_grouped(df, group_col, colnames, verbose=True):
+    """
+    Detect and remove outliers based on cosine distance + IQR,
+    applied separately per group (e.g., per clayBody).
+
+    Args:
+        df: pandas DataFrame
+        group_col: column name to group by (e.g., "clayBody")
+        colnames: list of feature-vector columns (np.array)
+        verbose: print debug info if True
+
+    Returns:
+        df_clean: DataFrame with outliers removed
+        outlier_info: dict[group][col] = thresholds and counts
+    """
+    outlier_info = {}
+    global_mask = pd.Series([False] * len(df), index=df.index)
+
+    for group, subdf in df.groupby(group_col):
+        outlier_info[group] = {}
+        if verbose:
+            print(f"=== Group: {group} (n={len(subdf)}) ===")
+        mask = pd.Series([False] * len(subdf), index=subdf.index)
+
+        for col in colnames:
+            X = np.stack(subdf[col].values)
+            centroid = X.mean(axis=0, keepdims=True)
+            dists = cosine_distances(X, centroid).ravel()
+
+            # IQR thresholds
+            q1, q3 = np.percentile(dists, [25, 75])
+            iqr = q3 - q1
+            lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+            outliers = (dists < lower) | (dists > upper)
+
+            mask = mask | outliers
+
+            outlier_info[group][col] = {
+                "q1": q1, "q3": q3, "iqr": iqr,
+                "lower": lower, "upper": upper,
+                "n_total": len(dists),
+                "n_outliers": int(outliers.sum())
+            }
+
+            if verbose:
+                print(f"[{col}] Q1={q1:.4f}, Q3={q3:.4f}, IQR={iqr:.4f}")
+                print(f"       Thresholds: [{lower:.4f}, {upper:.4f}]")
+                print(f"       Outliers: {outliers.sum()} / {len(dists)}")
+
+        global_mask.loc[mask.index] = global_mask.loc[mask.index] | mask
+
+    df_clean = df.loc[~global_mask].copy()
+
+    if verbose:
+        print(f"\n[Summary] Removed {global_mask.sum()} total outliers "
+              f"across {len(colnames)} columns and {df[group_col].nunique()} groups.")
+        print(f"Remaining samples: {len(df_clean)} / {len(df)}")
+
+    return df_clean, outlier_info
+
