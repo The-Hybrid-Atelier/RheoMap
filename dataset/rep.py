@@ -671,8 +671,12 @@ def generate_stacked_dataset_triplets(df, k=3, group_cols=('name', 'clayBody'), 
     print(f"New dataset has {len(new_df)} triplets after stacking.")
     return new_df
 
-def triplets_extract_features(df_clean_filt, k=3, group_cols=["name", "clayBody"]):
-    stacked_df = generate_stacked_dataset_triplets(df_clean_filt, k=k, group_cols=group_cols)
+def triplets_extract_features(df_clean_filt, k=3, group_cols=["name", "clayBody"],include_weight=False):
+    if include_weight == False:
+        stacked_df = generate_stacked_dataset_triplets(df_clean_filt, k=k, group_cols=group_cols, include_weight=False)
+    else:
+        stacked_df = generate_stacked_dataset_triplets(df_clean_filt, k=k, group_cols=group_cols , include_weight=True)
+        
     # 1. Apply both feature extraction functions first
     stacked_df['vuong_fv'] = stacked_df['vuong_sv_stack'].apply(
         lambda x: extract_features_nocv(x, "vuong")
