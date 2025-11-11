@@ -264,10 +264,6 @@ def stack_reps(df, data_col='data', group_size=3, keep_cols=None, material=None,
     return df_stacked
 
 
-# ============================================================================
-# NEW FUNCTIONS FOR COMPLETE PIPELINE
-# ============================================================================
-
 def extract_timestamp_from_id(df):
     """Extract timestamp from MongoDB ObjectID."""
     df = df.copy()
@@ -275,7 +271,6 @@ def extract_timestamp_from_id(df):
         datetime.fromtimestamp(int(str(oid)[:8], 16)) for oid in df['_id']
     ]
     return df
-
 
 
 def iqr_outlier_filter(df, verbose=True):
@@ -375,9 +370,7 @@ def process_rep_data(df, dtw_k=3.0, stack_k=3, cluster_seconds=10, verbose=True)
     if 'Time_Stamp' not in df.columns:
         raise ValueError("No 'Time_Stamp' or '_id' column found")
     
-    # ========================================================================
-    # STEP 1: LENGTH-BASED CLUSTER DROPPING (grouped by 'name')
-    # ========================================================================
+    # [1/6] LENGTH-BASED CLUSTER DROPPING (grouped by 'name')
     if verbose:
         print(f"\n[1/6] Length-based cluster dropping (±{cluster_seconds}s by 'name')...")
     
@@ -411,17 +404,13 @@ def process_rep_data(df, dtw_k=3.0, stack_k=3, cluster_seconds=10, verbose=True)
         print(f"  Modal length: {modal_len}")
         print(f"  Dropped {drop_mask.sum()} rows, kept {len(df_clean)}")
     
-    # ========================================================================
-    # STEP 2: DTW OUTLIER DETECTION
-    # ========================================================================
+    # [2/6] DTW OUTLIER DETECTION
     if verbose:
         print(f"\n[2/6] DTW outlier detection (k={dtw_k})...")
     
     dists, thr, keep = detect_outliers_dtw(df_clean, method="mad", k=dtw_k, verbose=verbose)
     
-    # ========================================================================
-    # STEP 3: EXPAND DTW OUTLIERS TO CLUSTERS (grouped by 'name')
-    # ========================================================================
+    # [3/6] EXPAND DTW OUTLIERS TO CLUSTERS (grouped by 'name')
     if verbose:
         print(f"\n[3/6] Expanding DTW outliers to clusters (±{cluster_seconds}s by 'name')...")
     
@@ -434,9 +423,7 @@ def process_rep_data(df, dtw_k=3.0, stack_k=3, cluster_seconds=10, verbose=True)
         print(f"  Expanded {bad.sum()} outliers to {expanded_bad.sum()}")
         print(f"  Kept {len(df_filt)} rows")
     
-    # ========================================================================
-    # STEP 4: EXTRACT GEOMETRIC FEATURES
-    # ========================================================================
+    # [4/6] EXTRACT GEOMETRIC FEATURES
     if verbose:
         print(f"\n[4/6] Extracting geometric features...")
     
@@ -445,9 +432,7 @@ def process_rep_data(df, dtw_k=3.0, stack_k=3, cluster_seconds=10, verbose=True)
     if verbose:
         print(f"  Extracted 12 features × {len(df_filt)} pulses")
     
-    # ========================================================================
-    # STEP 5: STACK (grouped by 'name' only)
-    # ========================================================================
+    # [5/6] STACK (grouped by 'name' only)
     if verbose:
         print(f"\n[5/6] Stacking (k={stack_k} by 'name')...")
     
@@ -489,9 +474,7 @@ def process_rep_data(df, dtw_k=3.0, stack_k=3, cluster_seconds=10, verbose=True)
         print(f"  geom_stack: ({stack_k}, 12)")
         print(f"  geo_fv: (12,), fluct_fv: (72,)")
     
-    # ========================================================================
-    # STEP 6: IQR OUTLIER FILTERING (grouped by 'name')
-    # ========================================================================
+    # [6/6] IQR OUTLIER FILTERING (grouped by 'name')
     if verbose:
         print(f"\n[6/6] IQR outlier filtering by 'name' (material)...")
     
@@ -507,10 +490,6 @@ def process_rep_data(df, dtw_k=3.0, stack_k=3, cluster_seconds=10, verbose=True)
     return df_final
 
 
-## Functions above this likne are too verbose, I'm not sure I can follow process_rep_data() for example
-##===================================================================================================
-## Marwan's Notebook functions
-##===================================================================================================
 def _as_1d(x):
     a = np.asarray(x, dtype=float)
     a = np.squeeze(a)
@@ -520,7 +499,7 @@ def _as_1d(x):
         raise ValueError(f"Sequence not 1-D after squeeze: shape={a.shape}")
     return a
 
-def detect_outliers_dtw_equal_len(df, data_col="data", method="mad", k=3.0, pct=90, verbose=True):
+def detect_outliers_dtw(df, data_col="data", method="mad", k=3.0, pct=90, verbose=True):
     """
     DTW outlier detection assuming equal-length 1-D sequences in df[data_col].
     Uses scalar-safe distance |a-b| to avoid scipy.euclidean 1-D checks.
@@ -562,15 +541,11 @@ def detect_outliers_dtw_equal_len(df, data_col="data", method="mad", k=3.0, pct=
     keep = dists <= thr
 
     if verbose:
-        print(f"DTW filter → kept {int(keep.sum())}/{len(keep)} "
-              f"(dropped {int((~keep).sum())}); threshold={thr:.3f}")
-        for j in np.where(~keep)[0]:
-            print(f"Outlier at positional index {j} (DTW={dists[j]:.2f})")
+        print(f"DTW: kept {int(keep.sum())}/{len(keep)}, dropped {int((~keep).sum())}, threshold={thr:.3f}")
 
     return dists, thr, keep
 
 
-#@title Plotting Function (Seaborn)
 def plot_pulse_by_name_sns(dataframe):
     unique_materials = dataframe['name'].unique().copy()
 
@@ -624,8 +599,6 @@ def plot_pulse_by_name_sns(dataframe):
         plt.show()
 
 
-
-#drop cluster function for DTW
 def expand_drop_to_clusters(df, bad_mask, group_col="name", time_col="Time_Stamp", seconds=10):
     """
     Expand per-row 'bad' mask to include any rows within ±seconds
@@ -652,9 +625,7 @@ def expand_drop_to_clusters(df, bad_mask, group_col="name", time_col="Time_Stamp
     return expanded.values
 
 
-#usecase stacked_df = generate_stacked_dataset_triplets(df_clean_filt, k=3, group_cols=["name", "clayBody"])
-
-def generate_stacked_dataset_triplets(df, k=3, group_cols=('name', 'clayBody')):
+def generate_stacked_dataset_triplets(df, k=3, group_cols=('name', 'clayBody'), include_weight=False):
     """
     Groups by `group_cols`, splits into triplets, and stacks:
       - 'vuong_sv' -> (k, n)
@@ -676,13 +647,23 @@ def generate_stacked_dataset_triplets(df, k=3, group_cols=('name', 'clayBody')):
             row = {col: val for col, val in zip(group_cols, gvals)}
             row['vuong_sv_stack'] = np.vstack(trip['vuong_sv'].values)
             row['data_stack']     = np.vstack(trip['data'].values)
-            row['time_stack_rel'] = trip['Relative_time_elapsed (s)'].to_numpy()
-            row['time_stack_glb'] = trip['Time_Elapsed (s)'].to_numpy()
-            row['trial_stack']    = trip['trial'].to_numpy()
-            if model_type == 'WaterLoss':
-                row['avg_weight']        = trip['estimated_weight'].mean()
+            
+            if 'Relative_time_elapsed (s)' in trip.columns:
+                row['time_stack_rel'] = trip['Relative_time_elapsed (s)'].to_numpy()
+            
+            if 'Time_Elapsed (s)' in trip.columns:
+                row['time_stack_glb'] = trip['Time_Elapsed (s)'].to_numpy()
+            
+            if 'trial' in trip.columns:
+                row['trial_stack']    = trip['trial'].to_numpy()
+            
+            if include_weight:
+                if 'estimated_weight' in trip.columns:
+                    row['avg_weight'] = trip['estimated_weight'].mean()
+                
                 loss_col = 'estimated_water_loss (g)' if 'estimated_water_loss (g)' in trip.columns else 'estimated_water_loss'
-                row['avg_water_loss'] = trip[loss_col].mean()
+                if loss_col in trip.columns:
+                    row['avg_water_loss'] = trip[loss_col].mean()
 
             out.append(row)
 
@@ -690,8 +671,8 @@ def generate_stacked_dataset_triplets(df, k=3, group_cols=('name', 'clayBody')):
     print(f"New dataset has {len(new_df)} triplets after stacking.")
     return new_df
 
-def triplets_extract_features(df_clean_filt):
-    stacked_df = generate_stacked_dataset_triplets(df_clean_filt, k=3, group_cols=["name", "clayBody"])
+def triplets_extract_features(df_clean_filt, k=3, group_cols=["name", "clayBody"]):
+    stacked_df = generate_stacked_dataset_triplets(df_clean_filt, k=k, group_cols=group_cols)
     # 1. Apply both feature extraction functions first
     stacked_df['vuong_fv'] = stacked_df['vuong_sv_stack'].apply(
         lambda x: extract_features_nocv(x, "vuong")
@@ -772,4 +753,3 @@ def iqr_outlier_filter_grouped(df, group_col, colnames, verbose=True):
         print(f"Remaining samples: {len(df_clean)} / {len(df)}")
 
     return df_clean, outlier_info
-
