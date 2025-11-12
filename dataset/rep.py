@@ -777,3 +777,39 @@ def generate_time_stamp(df):
     )
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
+
+def audit_reps(df, data_col=DATA_COL, group_col=GROUP_COL, head=5):
+    # lengths per row
+    lengths = df[data_col].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else np.nan)
+    has_nan = df[data_col].apply(lambda x: np.any(np.isnan(x)) if isinstance(x, (list, np.ndarray)) else True)
+
+    out = pd.DataFrame({
+        "len": lengths,
+        "has_nan": has_nan,
+        group_col: df[group_col].values
+    }, index=df.index)
+
+    print("=== Overall ===")
+    print("Rows:", len(out))
+    print("Unique lengths:", sorted(out['len'].dropna().unique().astype(int)))
+    print("Rows with NaNs:", int(out['has_nan'].sum()))
+    print()
+
+    print("=== By group (length stats) ===")
+    print(out.groupby(group_col)['len'].agg(['count','min','max','median','nunique']).sort_values(['nunique','max','min'], ascending=False))
+    print()
+
+    print("=== By group (NaN counts) ===")
+    print(out.groupby(group_col)['has_nan'].sum().rename('nan_rows'))
+    print()
+
+    # show examples of problematic rows
+    bad_len_mask = out['len'] != out['len'].mode().iloc[0]  # not the modal length
+    bad_nan_mask = out['has_nan']
+    bad_idx = out[bad_len_mask | bad_nan_mask].index.tolist()[:head]
+    if bad_idx:
+        print(f"Examples of problematic rows (first {len(bad_idx)}):", bad_idx)
+    else:
+        print("No problematic rows found.")
+
+    return out
