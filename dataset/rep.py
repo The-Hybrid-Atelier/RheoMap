@@ -662,183 +662,198 @@ def audit_reps(df, data_col="data", group_col="name", head=5):
 # MASTER FUNCTION
 # ============================================================================
 
-def process_rep_data(df, dtw_k=3.0, stack_k=3, cluster_seconds=10, verbose=True):
-    """
-    Process REP data from MongoDB.
-    
-    Pipeline:
-    1. Extract timestamp from _id
-    2. Length-based cluster dropping (±10s, grouped by 'name')
-    3. DTW outlier detection on 'data'
-    4. Expand DTW outliers to time clusters (±10s, grouped by 'name')
-    5. Extract geometric features from 'data'
-    6. Stack by 'name' (material type)
-    7. Extract feature vectors (geo_fv, fluct_fv)
-    8. IQR outlier filtering by 'name' (material type)
-    
-    Works for ANY material: clay, deflocculant, water, etc.
-    ALL original columns preserved.
-    
-    Parameters:
-    -----------
-    df : pd.DataFrame
-        DataFrame from MongoDB with columns: _id, name, data, etc.
-        'name' = material type (deflocculant, water, plaster, etc.)
-    dtw_k : float
-        DTW threshold multiplier (default: 3.0)
-    stack_k : int
-        Number of pulses per stack (default: 3)
-    cluster_seconds : int
-        Time window for cluster dropping (default: 10)
-    verbose : bool
-        Print progress (default: True)
-        
-    Returns:
-    --------
-    pd.DataFrame with all original columns plus:
-        - data_stack: (k, m) stacked pulses
-        - geom_stack: (k, 12) stacked features
-        - geo_fv: (12,) geometric feature vector
-        - fluct_fv: (72,) fluctuation feature vector
-        - Time_Stamp: extracted timestamp
-        
-    Example:
-    --------
-    >>> df_final = process_rep_data(df)
-    >>> df_final = process_rep_data(df, dtw_k=1.9, stack_k=5)
-    """
-    if verbose:
-        print("="*60)
-        print("REP DATA PROCESSING")
-        print("="*60)
-    
-    df = df.copy()
-    
-    # Extract timestamp from MongoDB ObjectID
-    if '_id' in df.columns and 'Time_Stamp' not in df.columns:
-        if verbose:
-            print("\n[Auto] Extracting timestamp from MongoDB ObjectID...")
-        df = extract_timestamp_from_id(df)
-    
-    if 'Time_Stamp' not in df.columns:
-        raise ValueError("No 'Time_Stamp' or '_id' column found")
-    
-    # [1/6] LENGTH-BASED CLUSTER DROPPING (grouped by 'name')
-    if verbose:
-        print(f"\n[1/6] Length-based cluster dropping (±{cluster_seconds}s by 'name')...")
-    
-    if not np.issubdtype(df['Time_Stamp'].dtype, np.datetime64):
-        df['Time_Stamp'] = pd.to_datetime(df['Time_Stamp'])
-    
-    df = df.sort_values(['name', 'Time_Stamp']).reset_index(drop=True)
-    
-    df['rep_len'] = df['data'].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else np.nan)
-    modal_len = int(df['rep_len'].mode().iloc[0])
-    
-    odd_idx = df.index[df['rep_len'] != modal_len].tolist()
-    
-    drop_mask = pd.Series(False, index=df.index)
-    cluster_radius = pd.Timedelta(seconds=cluster_seconds)
-    
+def clean_data_master(df, TARGET, head=5,DTW_graph = False):
+    audit = rep.audit_reps(df,data_col="data", group_col="name")
+
+    modal_len = 22
+    # Boolean mask for rows that are not 22
+    mask_weird = audit['len'] != modal_len
+    # Count them
+    num_weird = mask_weird.sum()
+    print(f"Weird rows (length not {modal_len}):", num_weird)
+    # Show breakdown by group
+    print(audit[mask_weird].groupby('name')['len'].value_counts())
+
+    #Dropping clusters if they have different lengths
+    # main_df has columns: 'name', 'Time_Stamp' (datetime-like), 'data' (1D array/list)
+    # 0) Ensure types & order
+    main_df = df.copy()
+    if not np.issubdtype(main_df['Time_Stamp'].dtype, np.datetime64):
+        main_df['Time_Stamp'] = pd.to_datetime(main_df['Time_Stamp'])
+    main_df = main_df.sort_values(['name', 'Time_Stamp']).reset_index(drop=True)
+
+    # 1) Compute REP lengths and modal (expected) length
+    main_df['rep_len'] = main_df['data'].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else np.nan)
+    modal_len = int(main_df['rep_len'].mode().iloc[0])
+
+    # 2) Indices of odd-length rows
+    odd_idx = main_df.index[main_df['rep_len'] != modal_len].tolist()
+
+    # 3) Build a drop mask by expanding each odd row to its 10s cluster (same 'name')
+    drop_mask = pd.Series(False, index=main_df.index)
+    cluster_radius = pd.Timedelta(seconds=10)
+
     for i in odd_idx:
-        if drop_mask[i]:
+        if drop_mask[i]:  # already covered by a previous cluster
             continue
-        nm = df.at[i, 'name']
-        ts = df.at[i, 'Time_Stamp']
+        nm = main_df.at[i, 'name']
+        ts = main_df.at[i, 'Time_Stamp']
+        # Same name, within ±10s of this REP
         in_cluster = (
-            (df['name'] == nm) &
-            (df['Time_Stamp'].between(ts - cluster_radius, ts + cluster_radius))
+            (main_df['name'] == nm) &
+            (main_df['Time_Stamp'].between(ts - cluster_radius, ts + cluster_radius))
         )
-        drop_mask |= in_cluster
-    
-    df_clean = df.loc[~drop_mask].drop(columns=['rep_len']).reset_index(drop=True)
-    
-    if verbose:
-        print(f"  Modal length: {modal_len}")
-        print(f"  Dropped {drop_mask.sum()} rows, kept {len(df_clean)}")
-    
-    # [2/6] DTW OUTLIER DETECTION
-    if verbose:
-        print(f"\n[2/6] DTW outlier detection (k={dtw_k})...")
-    
-    dists, thr, keep = detect_outliers_dtw(df_clean, method="mad", k=dtw_k, verbose=verbose)
-    
-    # [3/6] EXPAND DTW OUTLIERS TO CLUSTERS (grouped by 'name')
-    if verbose:
-        print(f"\n[3/6] Expanding DTW outliers to clusters (±{cluster_seconds}s by 'name')...")
-    
+        drop_mask |= in_cluster  # union of all cluster members
+
+    dropped_rows = main_df.loc[drop_mask, ["name", "Time_Stamp", "rep_len"]]
+    print(dropped_rows.sort_values(["name", "Time_Stamp"]))
+
+    # 4) Apply drop
+    df_clean = main_df.loc[~drop_mask].drop(columns=['rep_len']).reset_index(drop=True)
+
+    # 5) Report
+    n_drop = int(drop_mask.sum())
+    n_keep = len(main_df) - n_drop
+    per_name = main_df.loc[drop_mask, 'name'].value_counts()
+
+    print(f"Modal REP length = {modal_len}")
+    print(f"Dropped {n_drop} rows in {per_name.size} cluster(s); kept {n_keep} rows.")
+    print("Dropped per name:")
+    print(per_name)
+
+
+    #before
+    print("Data Before DTW: ")
+    if DTW_graph == True:
+        rep.plot_pulse_by_name_sns(df_clean)
+    print(df_clean['name'])
+    dists, thr, keep = rep.detect_outliers_dtw(
+        df_clean, data_col="data",
+        method="mad", k=3 # for everything else is k = 3, except mixing k = 1.9 (visually)
+    )
+
+    # Expand drops to clusters (±10 s within same name)
     bad = ~keep
-    expanded_bad = expand_drop_to_clusters(df_clean, bad, seconds=cluster_seconds)
-    
-    df_filt = df_clean.loc[~expanded_bad].reset_index(drop=True)
-    
-    if verbose:
-        print(f"  Expanded {bad.sum()} outliers to {expanded_bad.sum()}")
-        print(f"  Kept {len(df_filt)} rows")
-    
-    # [4/6] EXTRACT GEOMETRIC FEATURES
-    if verbose:
-        print(f"\n[4/6] Extracting geometric features...")
-    
-    df_filt['vuong_sv'] = df_filt['data'].apply(extract_features)
-    
-    if verbose:
-        print(f"  Extracted 12 features × {len(df_filt)} pulses")
-    
-    # [5/6] STACK (grouped by 'name' only)
-    if verbose:
-        print(f"\n[5/6] Stacking (k={stack_k} by 'name')...")
-    
-    keep_cols = [col for col in df_filt.columns if col not in ['vuong_sv']]
-    
-    out = []
-    for name, g in df_filt.groupby('name', sort=False):
-        g = g.reset_index(drop=True)
-        num_stacks = len(g) // stack_k
-        
-        for i in range(num_stacks):
-            stack = g.iloc[i*stack_k:(i+1)*stack_k]
-            
-            # Keep all columns from first row
-            row = stack.iloc[0][keep_cols].to_dict()
-            
-            # Stack data and features
-            row['data_stack'] = np.vstack(stack['data'].values)
-            row['vuong_sv_stack'] = np.vstack(stack['vuong_sv'].values)
-            
-            out.append(row)
-    
-    stacked_df = pd.DataFrame(out)
-    
-    # Extract feature vectors
-    stacked_df['geo_fv'] = stacked_df['vuong_sv_stack'].apply(
-        lambda x: extract_features_nocv(x, "vuong")
+    expanded_bad = rep.expand_drop_to_clusters(df_clean, bad, group_col="name",
+                                        time_col="Time_Stamp", seconds=10)
+    # Final filtered DF
+    df_clean_filt = df_clean.loc[~expanded_bad].reset_index(drop=True)
+    if DTW_graph == True:
+        rep.plot_pulse_by_name_sns(df_clean)
+    print("Data After DTW: ")
+    df_clean_filt.groupby('samplingLocation').describe()
+
+
+    df_clean_filt['name'] = ["mixed-5mins" if name == 'mixed-5min' else name for name in df_clean_filt['name'] ]
+    # 1. Check that all items in the 'data' column are arrays
+    all_are_arrays = df_clean_filt['data'].apply(lambda x: isinstance(x, (np.ndarray, list))).all()
+
+    # 2. Check that all arrays are the same length
+    array_lengths = df_clean_filt['data'].apply(len)
+    df_clean_filt = df_clean_filt[array_lengths == 22].reset_index(drop=True)
+    all_same_length = array_lengths.nunique() == 1
+
+    if all_same_length and all_are_arrays:
+        # Convert to numpy arrays
+        df_clean_filt['data'] = df_clean_filt['data'].apply(np.array)
+        print("Converted to numpy arrays")
+        # Summary
+        print(f"All data entries are arrays/lists? {all_are_arrays}")
+        print(f"All data arrays have the same length? {all_same_length}")
+        if all_same_length:
+            print(f"Array length: {array_lengths.iloc[0]}")
+        else:
+            print("Lengths found:", array_lengths.value_counts())
+
+    # Description
+    name_summary = df_clean_filt.groupby('name').size().reset_index(name='count').sort_values(by='count', ascending=False)
+    print(name_summary)
+
+    #cleaned and Raw data, we use Raw since it has more variation
+    fig, ax = rep.plot_lines_by_condition(df_clean_filt, pulse_col="data", condition_col="name")
+    ax.set_title("RAW", fontsize=18)
+
+    df_clean_filt['vuong_clean'] = df_clean_filt['data'].apply(rep.filter_pulse)
+    fig, ax = rep.plot_lines_by_condition(df_clean_filt, pulse_col="vuong_clean", condition_col="name")
+    ax.set_title("CLEANED", fontsize=18)
+
+
+    # Generate feature vectors
+    pulse_col = 'data' # no cleaning
+    # pulse_col = 'vuong_clean'
+
+    df_clean_filt['vuong_sv'] = df_clean_filt['data'].apply(rep.extract_features)
+    df_clean_filt.columns
+    df_clean_filt
+
+
+    stacked_df = rep.triplets_extract_features(df_clean_filt, include_weight = False)
+
+    if TARGET == 'time':
+        renamed_df = df.rename(columns={
+            "name": "trial_identifier",
+            "data_stack": "REP_pulses",
+            "vuong_sv_stack": "geom_stack",
+            "vuong_fv": "geom_fv",
+            "matnoise_fv": "fluctuation_fv",
+            'time_stack_rel':'time_stack_rel'
+        })
+
+        # Reorder to your requested layout
+        renamed_df = renamed_df[[
+            "clayBody",
+            "trial_identifier",
+            "REP_pulses",
+            "geom_stack",
+            "geom_fv",
+            "fluctuation_fv",
+            "time_stack_rel"
+        ]]
+        renamed_df['dwell_time_min'] = renamed_df.groupby('trial_identifier').cumcount()
+
+    elif TARGET == 'mixing':
+        renamed_df = stacked_df.rename(columns={
+            "name": "time_since_mixed_min",
+            "data_stack": "REP_pulses",
+            "vuong_sv_stack": "geom_stack",
+            "vuong_fv": "geom_fv",
+            "matnoise_fv": "fluctuation_fv"
+        })
+
+        # Reorder to your requested layout
+        renamed_df = renamed_df[[
+            "clayBody",
+            "time_since_mixed_min",
+            "REP_pulses",
+            "geom_stack",
+            "geom_fv",
+            "fluctuation_fv"
+        ]]
+    else:
+        renamed_df = stacked_df.rename(columns={
+            "data_stack": "REP_pulses",
+            "vuong_sv_stack": "geom_stack",
+            "vuong_fv": "geom_fv",
+            "matnoise_fv": "fluctuation_fv"
+        })
+        renamed_df = renamed_df[[
+            "clayBody",
+            "name",
+            "REP_pulses",
+            "geom_stack",
+            "geom_fv",
+            "fluctuation_fv"
+        ]]
+
+    has_nan = renamed_df["fluctuation_fv"].apply(lambda arr: np.isnan(arr).any())
+    print("Rows with NaN in fluctuation_fv:", has_nan.sum())
+
+    #outlier description
+    dimension = "clayBody"
+    df_clean, outlier_info = rep.iqr_outlier_filter_grouped(
+        renamed_df, group_col="clayBody",
+        colnames=["fluctuation_fv", "geom_fv"],
+        verbose=True
     )
-    stacked_df['fluct_fv'] = stacked_df['vuong_sv_stack'].apply(
-        lambda x: extract_features_nocv(x, "matnoise")
-    )
-    
-    stacked_df = stacked_df.rename(columns={'vuong_sv_stack': 'geom_stack'})
-    
-    if verbose:
-        print(f"  Created {len(stacked_df)} stacks")
-        data_len = len(df_filt['data'].iloc[0]) if len(df_filt) > 0 else 0
-        print(f"  data_stack: ({stack_k}, {data_len})")
-        print(f"  geom_stack: ({stack_k}, 12)")
-        print(f"  geo_fv: (12,), fluct_fv: (72,)")
-    
-    # [6/6] IQR OUTLIER FILTERING (grouped by 'name')
-    if verbose:
-        print(f"\n[6/6] IQR outlier filtering by 'name' (material)...")
-    
-    df_final, _ = iqr_outlier_filter(stacked_df, verbose=verbose)
-    
-    if verbose:
-        print("\n" + "="*60)
-        print("COMPLETE!")
-        print("="*60)
-        print(f"Final shape: {df_final.shape}")
-        print(f"Materials: {df_final['name'].unique().tolist()}")
-    
-    return df_final
+    return df_clean, outlier_info
 
