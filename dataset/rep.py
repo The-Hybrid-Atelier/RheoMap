@@ -333,188 +333,6 @@ def iqr_outlier_filter(df, verbose=True):
     
     return df_clean, outlier_info
 
-
-def process_rep_data(df, dtw_k=3.0, stack_k=3, cluster_seconds=10, verbose=True):
-    """
-    Process REP data from MongoDB.
-    
-    Pipeline:
-    1. Extract timestamp from _id
-    2. Length-based cluster dropping (±10s, grouped by 'name')
-    3. DTW outlier detection on 'data'
-    4. Expand DTW outliers to time clusters (±10s, grouped by 'name')
-    5. Extract geometric features from 'data'
-    6. Stack by 'name' (material type)
-    7. Extract feature vectors (geo_fv, fluct_fv)
-    8. IQR outlier filtering by 'name' (material type)
-    
-    Works for ANY material: clay, deflocculant, water, etc.
-    ALL original columns preserved.
-    
-    Parameters:
-    -----------
-    df : pd.DataFrame
-        DataFrame from MongoDB with columns: _id, name, data, etc.
-        'name' = material type (deflocculant, water, plaster, etc.)
-    dtw_k : float
-        DTW threshold multiplier (default: 3.0)
-    stack_k : int
-        Number of pulses per stack (default: 3)
-    cluster_seconds : int
-        Time window for cluster dropping (default: 10)
-    verbose : bool
-        Print progress (default: True)
-        
-    Returns:
-    --------
-    pd.DataFrame with all original columns plus:
-        - data_stack: (k, m) stacked pulses
-        - geom_stack: (k, 12) stacked features
-        - geo_fv: (12,) geometric feature vector
-        - fluct_fv: (72,) fluctuation feature vector
-        - Time_Stamp: extracted timestamp
-        
-    Example:
-    --------
-    >>> df_final = process_rep_data(df)
-    >>> df_final = process_rep_data(df, dtw_k=1.9, stack_k=5)
-    """
-    if verbose:
-        print("="*60)
-        print("REP DATA PROCESSING")
-        print("="*60)
-    
-    df = df.copy()
-    
-    # Extract timestamp from MongoDB ObjectID
-    if '_id' in df.columns and 'Time_Stamp' not in df.columns:
-        if verbose:
-            print("\n[Auto] Extracting timestamp from MongoDB ObjectID...")
-        df = extract_timestamp_from_id(df)
-    
-    if 'Time_Stamp' not in df.columns:
-        raise ValueError("No 'Time_Stamp' or '_id' column found")
-    
-    # [1/6] LENGTH-BASED CLUSTER DROPPING (grouped by 'name')
-    if verbose:
-        print(f"\n[1/6] Length-based cluster dropping (±{cluster_seconds}s by 'name')...")
-    
-    if not np.issubdtype(df['Time_Stamp'].dtype, np.datetime64):
-        df['Time_Stamp'] = pd.to_datetime(df['Time_Stamp'])
-    
-    df = df.sort_values(['name', 'Time_Stamp']).reset_index(drop=True)
-    
-    df['rep_len'] = df['data'].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else np.nan)
-    modal_len = int(df['rep_len'].mode().iloc[0])
-    
-    odd_idx = df.index[df['rep_len'] != modal_len].tolist()
-    
-    drop_mask = pd.Series(False, index=df.index)
-    cluster_radius = pd.Timedelta(seconds=cluster_seconds)
-    
-    for i in odd_idx:
-        if drop_mask[i]:
-            continue
-        nm = df.at[i, 'name']
-        ts = df.at[i, 'Time_Stamp']
-        in_cluster = (
-            (df['name'] == nm) &
-            (df['Time_Stamp'].between(ts - cluster_radius, ts + cluster_radius))
-        )
-        drop_mask |= in_cluster
-    
-    df_clean = df.loc[~drop_mask].drop(columns=['rep_len']).reset_index(drop=True)
-    
-    if verbose:
-        print(f"  Modal length: {modal_len}")
-        print(f"  Dropped {drop_mask.sum()} rows, kept {len(df_clean)}")
-    
-    # [2/6] DTW OUTLIER DETECTION
-    if verbose:
-        print(f"\n[2/6] DTW outlier detection (k={dtw_k})...")
-    
-    dists, thr, keep = detect_outliers_dtw(df_clean, method="mad", k=dtw_k, verbose=verbose)
-    
-    # [3/6] EXPAND DTW OUTLIERS TO CLUSTERS (grouped by 'name')
-    if verbose:
-        print(f"\n[3/6] Expanding DTW outliers to clusters (±{cluster_seconds}s by 'name')...")
-    
-    bad = ~keep
-    expanded_bad = expand_drop_to_clusters(df_clean, bad, seconds=cluster_seconds)
-    
-    df_filt = df_clean.loc[~expanded_bad].reset_index(drop=True)
-    
-    if verbose:
-        print(f"  Expanded {bad.sum()} outliers to {expanded_bad.sum()}")
-        print(f"  Kept {len(df_filt)} rows")
-    
-    # [4/6] EXTRACT GEOMETRIC FEATURES
-    if verbose:
-        print(f"\n[4/6] Extracting geometric features...")
-    
-    df_filt['vuong_sv'] = df_filt['data'].apply(extract_features)
-    
-    if verbose:
-        print(f"  Extracted 12 features × {len(df_filt)} pulses")
-    
-    # [5/6] STACK (grouped by 'name' only)
-    if verbose:
-        print(f"\n[5/6] Stacking (k={stack_k} by 'name')...")
-    
-    keep_cols = [col for col in df_filt.columns if col not in ['vuong_sv']]
-    
-    out = []
-    for name, g in df_filt.groupby('name', sort=False):
-        g = g.reset_index(drop=True)
-        num_stacks = len(g) // stack_k
-        
-        for i in range(num_stacks):
-            stack = g.iloc[i*stack_k:(i+1)*stack_k]
-            
-            # Keep all columns from first row
-            row = stack.iloc[0][keep_cols].to_dict()
-            
-            # Stack data and features
-            row['data_stack'] = np.vstack(stack['data'].values)
-            row['vuong_sv_stack'] = np.vstack(stack['vuong_sv'].values)
-            
-            out.append(row)
-    
-    stacked_df = pd.DataFrame(out)
-    
-    # Extract feature vectors
-    stacked_df['geo_fv'] = stacked_df['vuong_sv_stack'].apply(
-        lambda x: extract_features_nocv(x, "vuong")
-    )
-    stacked_df['fluct_fv'] = stacked_df['vuong_sv_stack'].apply(
-        lambda x: extract_features_nocv(x, "matnoise")
-    )
-    
-    stacked_df = stacked_df.rename(columns={'vuong_sv_stack': 'geom_stack'})
-    
-    if verbose:
-        print(f"  Created {len(stacked_df)} stacks")
-        data_len = len(df_filt['data'].iloc[0]) if len(df_filt) > 0 else 0
-        print(f"  data_stack: ({stack_k}, {data_len})")
-        print(f"  geom_stack: ({stack_k}, 12)")
-        print(f"  geo_fv: (12,), fluct_fv: (72,)")
-    
-    # [6/6] IQR OUTLIER FILTERING (grouped by 'name')
-    if verbose:
-        print(f"\n[6/6] IQR outlier filtering by 'name' (material)...")
-    
-    df_final, _ = iqr_outlier_filter(stacked_df, verbose=verbose)
-    
-    if verbose:
-        print("\n" + "="*60)
-        print("COMPLETE!")
-        print("="*60)
-        print(f"Final shape: {df_final.shape}")
-        print(f"Materials: {df_final['name'].unique().tolist()}")
-    
-    return df_final
-
-
 def _as_1d(x):
     a = np.asarray(x, dtype=float)
     a = np.squeeze(a)
@@ -839,3 +657,188 @@ def audit_reps(df, data_col="data", group_col="name", head=5):
         print("No problematic rows found.")
 
     return out
+
+# ============================================================================
+# MASTER FUNCTION
+# ============================================================================
+
+def process_rep_data(df, dtw_k=3.0, stack_k=3, cluster_seconds=10, verbose=True):
+    """
+    Process REP data from MongoDB.
+    
+    Pipeline:
+    1. Extract timestamp from _id
+    2. Length-based cluster dropping (±10s, grouped by 'name')
+    3. DTW outlier detection on 'data'
+    4. Expand DTW outliers to time clusters (±10s, grouped by 'name')
+    5. Extract geometric features from 'data'
+    6. Stack by 'name' (material type)
+    7. Extract feature vectors (geo_fv, fluct_fv)
+    8. IQR outlier filtering by 'name' (material type)
+    
+    Works for ANY material: clay, deflocculant, water, etc.
+    ALL original columns preserved.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        DataFrame from MongoDB with columns: _id, name, data, etc.
+        'name' = material type (deflocculant, water, plaster, etc.)
+    dtw_k : float
+        DTW threshold multiplier (default: 3.0)
+    stack_k : int
+        Number of pulses per stack (default: 3)
+    cluster_seconds : int
+        Time window for cluster dropping (default: 10)
+    verbose : bool
+        Print progress (default: True)
+        
+    Returns:
+    --------
+    pd.DataFrame with all original columns plus:
+        - data_stack: (k, m) stacked pulses
+        - geom_stack: (k, 12) stacked features
+        - geo_fv: (12,) geometric feature vector
+        - fluct_fv: (72,) fluctuation feature vector
+        - Time_Stamp: extracted timestamp
+        
+    Example:
+    --------
+    >>> df_final = process_rep_data(df)
+    >>> df_final = process_rep_data(df, dtw_k=1.9, stack_k=5)
+    """
+    if verbose:
+        print("="*60)
+        print("REP DATA PROCESSING")
+        print("="*60)
+    
+    df = df.copy()
+    
+    # Extract timestamp from MongoDB ObjectID
+    if '_id' in df.columns and 'Time_Stamp' not in df.columns:
+        if verbose:
+            print("\n[Auto] Extracting timestamp from MongoDB ObjectID...")
+        df = extract_timestamp_from_id(df)
+    
+    if 'Time_Stamp' not in df.columns:
+        raise ValueError("No 'Time_Stamp' or '_id' column found")
+    
+    # [1/6] LENGTH-BASED CLUSTER DROPPING (grouped by 'name')
+    if verbose:
+        print(f"\n[1/6] Length-based cluster dropping (±{cluster_seconds}s by 'name')...")
+    
+    if not np.issubdtype(df['Time_Stamp'].dtype, np.datetime64):
+        df['Time_Stamp'] = pd.to_datetime(df['Time_Stamp'])
+    
+    df = df.sort_values(['name', 'Time_Stamp']).reset_index(drop=True)
+    
+    df['rep_len'] = df['data'].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else np.nan)
+    modal_len = int(df['rep_len'].mode().iloc[0])
+    
+    odd_idx = df.index[df['rep_len'] != modal_len].tolist()
+    
+    drop_mask = pd.Series(False, index=df.index)
+    cluster_radius = pd.Timedelta(seconds=cluster_seconds)
+    
+    for i in odd_idx:
+        if drop_mask[i]:
+            continue
+        nm = df.at[i, 'name']
+        ts = df.at[i, 'Time_Stamp']
+        in_cluster = (
+            (df['name'] == nm) &
+            (df['Time_Stamp'].between(ts - cluster_radius, ts + cluster_radius))
+        )
+        drop_mask |= in_cluster
+    
+    df_clean = df.loc[~drop_mask].drop(columns=['rep_len']).reset_index(drop=True)
+    
+    if verbose:
+        print(f"  Modal length: {modal_len}")
+        print(f"  Dropped {drop_mask.sum()} rows, kept {len(df_clean)}")
+    
+    # [2/6] DTW OUTLIER DETECTION
+    if verbose:
+        print(f"\n[2/6] DTW outlier detection (k={dtw_k})...")
+    
+    dists, thr, keep = detect_outliers_dtw(df_clean, method="mad", k=dtw_k, verbose=verbose)
+    
+    # [3/6] EXPAND DTW OUTLIERS TO CLUSTERS (grouped by 'name')
+    if verbose:
+        print(f"\n[3/6] Expanding DTW outliers to clusters (±{cluster_seconds}s by 'name')...")
+    
+    bad = ~keep
+    expanded_bad = expand_drop_to_clusters(df_clean, bad, seconds=cluster_seconds)
+    
+    df_filt = df_clean.loc[~expanded_bad].reset_index(drop=True)
+    
+    if verbose:
+        print(f"  Expanded {bad.sum()} outliers to {expanded_bad.sum()}")
+        print(f"  Kept {len(df_filt)} rows")
+    
+    # [4/6] EXTRACT GEOMETRIC FEATURES
+    if verbose:
+        print(f"\n[4/6] Extracting geometric features...")
+    
+    df_filt['vuong_sv'] = df_filt['data'].apply(extract_features)
+    
+    if verbose:
+        print(f"  Extracted 12 features × {len(df_filt)} pulses")
+    
+    # [5/6] STACK (grouped by 'name' only)
+    if verbose:
+        print(f"\n[5/6] Stacking (k={stack_k} by 'name')...")
+    
+    keep_cols = [col for col in df_filt.columns if col not in ['vuong_sv']]
+    
+    out = []
+    for name, g in df_filt.groupby('name', sort=False):
+        g = g.reset_index(drop=True)
+        num_stacks = len(g) // stack_k
+        
+        for i in range(num_stacks):
+            stack = g.iloc[i*stack_k:(i+1)*stack_k]
+            
+            # Keep all columns from first row
+            row = stack.iloc[0][keep_cols].to_dict()
+            
+            # Stack data and features
+            row['data_stack'] = np.vstack(stack['data'].values)
+            row['vuong_sv_stack'] = np.vstack(stack['vuong_sv'].values)
+            
+            out.append(row)
+    
+    stacked_df = pd.DataFrame(out)
+    
+    # Extract feature vectors
+    stacked_df['geo_fv'] = stacked_df['vuong_sv_stack'].apply(
+        lambda x: extract_features_nocv(x, "vuong")
+    )
+    stacked_df['fluct_fv'] = stacked_df['vuong_sv_stack'].apply(
+        lambda x: extract_features_nocv(x, "matnoise")
+    )
+    
+    stacked_df = stacked_df.rename(columns={'vuong_sv_stack': 'geom_stack'})
+    
+    if verbose:
+        print(f"  Created {len(stacked_df)} stacks")
+        data_len = len(df_filt['data'].iloc[0]) if len(df_filt) > 0 else 0
+        print(f"  data_stack: ({stack_k}, {data_len})")
+        print(f"  geom_stack: ({stack_k}, 12)")
+        print(f"  geo_fv: (12,), fluct_fv: (72,)")
+    
+    # [6/6] IQR OUTLIER FILTERING (grouped by 'name')
+    if verbose:
+        print(f"\n[6/6] IQR outlier filtering by 'name' (material)...")
+    
+    df_final, _ = iqr_outlier_filter(stacked_df, verbose=verbose)
+    
+    if verbose:
+        print("\n" + "="*60)
+        print("COMPLETE!")
+        print("="*60)
+        print(f"Final shape: {df_final.shape}")
+        print(f"Materials: {df_final['name'].unique().tolist()}")
+    
+    return df_final
+
