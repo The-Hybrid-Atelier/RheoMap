@@ -83,22 +83,40 @@ def filter_pulse(pulse, median_k=5, wavelet='db1', level=1, window_size=3):
         A filtered 1D numpy array (shortened due to moving average).
     """
     # Step 1: Median filter
-    pulse_med = medfilt(pulse, kernel_size=median_k)
+    pulse_med = median_filter(pulse, kernel_size=median_k)
 
     # Step 2: Wavelet denoising
-    coeffs = pywt.wavedec(pulse_med, wavelet, level=level)
-    coeffs[1:] = [pywt.threshold(detail, np.std(detail)) for detail in coeffs[1:]]
-    pulse_wave = pywt.waverec(coeffs, wavelet)
-
+    pulse_wave = wavelet_filter(pulse_med, wavelet=wavelet, level=level)
+    
     # Match original length in case waverec adds samples
     pulse_wave = pulse_wave[:len(pulse_med)]
 
-    # Step 3: Moving average
-    pulse_smooth = np.convolve(pulse_wave, np.ones(window_size) / window_size, mode='valid')
+    # Step 3: Moving average smoothing
+    pulse_smooth = smooth(pulse_wave, window_size=window_size)
 
     return pulse_smooth
 
 def extract_features(pulse):
+    """
+    Extract geometric features from a pulse signal.
+    Automatically applies filtering (median + wavelet + smoothing) before extraction.
+    
+    Parameters:
+    -----------
+    pulse : array-like
+        Raw pulse signal
+        
+    Returns:
+    --------
+    list : 12 extracted features
+        [basevalue, min_retraction_value, max_extrusion_value, equilibrium_value,
+         max_retraction_time, max_extrusion_time, equilibrium_time, 
+         extrusion_period, equilibrium_period, fluid_release_point_time,
+         fluid_release_point_value, fluid_release_point_period]
+    """
+    # Always apply filtering before feature extraction
+    pulse = filter_pulse(pulse)
+    
     df = pd.DataFrame({"time": np.arange(len(pulse)), "signal": pulse})
 
     # Feature Extraction
@@ -151,6 +169,11 @@ def extract_features(pulse):
     }
     # return resp
     return resp["values"]
+
+
+# ============================================================================
+# HELPER FUNCTIONS FOR PROCESS_REP_DATA
+# ============================================================================
 
 def extract_features_nocv(stack, set="vuong"):
     """
