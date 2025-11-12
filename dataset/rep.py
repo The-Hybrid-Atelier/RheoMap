@@ -115,7 +115,8 @@ def extract_features(pulse):
          fluid_release_point_value, fluid_release_point_period]
     """
     # Always apply filtering before feature extraction
-    pulse = filter_pulse(pulse)
+    
+    # pulse = filter_pulse(pulse) #### PRE FILTERING - SINGLE REP FILTERING
     
     df = pd.DataFrame({"time": np.arange(len(pulse)), "signal": pulse})
 
