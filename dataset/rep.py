@@ -803,7 +803,7 @@ def generate_time_stamp(df):
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
 
-def audit_reps(df, data_col=DATA_COL, group_col=GROUP_COL, head=5):
+def audit_reps(df, data_col="data", group_col="name", head=5):
     # lengths per row
     lengths = df[data_col].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else np.nan)
     has_nan = df[data_col].apply(lambda x: np.any(np.isnan(x)) if isinstance(x, (list, np.ndarray)) else True)
