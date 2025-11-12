@@ -172,7 +172,8 @@ def extract_features(pulse):
 
 
 # ============================================================================
-# HELPER FUNCTIONS FOR PROCESS_REP_DATA
+#    AFTER RHEOMAP
+#    HELPER FUNCTIONS FOR PROCESS_REP_DATA 
 # ============================================================================
 
 def extract_features_nocv(stack, set="vuong"):
