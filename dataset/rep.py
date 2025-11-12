@@ -663,7 +663,7 @@ def audit_reps(df, data_col="data", group_col="name", head=5):
 # ============================================================================
 
 def clean_data_master(df, TARGET, head=5,DTW_graph = False):
-    audit = rep.audit_reps(df,data_col="data", group_col="name")
+    audit = audit_reps(df,data_col="data", group_col="name")
 
     modal_len = 22
     # Boolean mask for rows that are not 22
@@ -725,21 +725,21 @@ def clean_data_master(df, TARGET, head=5,DTW_graph = False):
     #before
     print("Data Before DTW: ")
     if DTW_graph == True:
-        rep.plot_pulse_by_name_sns(df_clean)
+        plot_pulse_by_name_sns(df_clean)
     print(df_clean['name'])
-    dists, thr, keep = rep.detect_outliers_dtw(
+    dists, thr, keep = detect_outliers_dtw(
         df_clean, data_col="data",
         method="mad", k=3 # for everything else is k = 3, except mixing k = 1.9 (visually)
     )
 
     # Expand drops to clusters (±10 s within same name)
     bad = ~keep
-    expanded_bad = rep.expand_drop_to_clusters(df_clean, bad, group_col="name",
+    expanded_bad = expand_drop_to_clusters(df_clean, bad, group_col="name",
                                         time_col="Time_Stamp", seconds=10)
     # Final filtered DF
     df_clean_filt = df_clean.loc[~expanded_bad].reset_index(drop=True)
     if DTW_graph == True:
-        rep.plot_pulse_by_name_sns(df_clean)
+        plot_pulse_by_name_sns(df_clean)
     print("Data After DTW: ")
     df_clean_filt.groupby('samplingLocation').describe()
 
@@ -770,11 +770,11 @@ def clean_data_master(df, TARGET, head=5,DTW_graph = False):
     print(name_summary)
 
     #cleaned and Raw data, we use Raw since it has more variation
-    fig, ax = rep.plot_lines_by_condition(df_clean_filt, pulse_col="data", condition_col="name")
+    fig, ax = plot_lines_by_condition(df_clean_filt, pulse_col="data", condition_col="name")
     ax.set_title("RAW", fontsize=18)
 
-    df_clean_filt['vuong_clean'] = df_clean_filt['data'].apply(rep.filter_pulse)
-    fig, ax = rep.plot_lines_by_condition(df_clean_filt, pulse_col="vuong_clean", condition_col="name")
+    df_clean_filt['vuong_clean'] = df_clean_filt['data'].apply(filter_pulse)
+    fig, ax = plot_lines_by_condition(df_clean_filt, pulse_col="vuong_clean", condition_col="name")
     ax.set_title("CLEANED", fontsize=18)
 
 
@@ -782,12 +782,12 @@ def clean_data_master(df, TARGET, head=5,DTW_graph = False):
     pulse_col = 'data' # no cleaning
     # pulse_col = 'vuong_clean'
 
-    df_clean_filt['vuong_sv'] = df_clean_filt['data'].apply(rep.extract_features)
+    df_clean_filt['vuong_sv'] = df_clean_filt['data'].apply(extract_features)
     df_clean_filt.columns
     df_clean_filt
 
 
-    stacked_df = rep.triplets_extract_features(df_clean_filt, include_weight = False)
+    stacked_df = triplets_extract_features(df_clean_filt, include_weight = False)
 
     if TARGET == 'time':
         renamed_df = df.rename(columns={
@@ -850,7 +850,7 @@ def clean_data_master(df, TARGET, head=5,DTW_graph = False):
 
     #outlier description
     dimension = "clayBody"
-    df_clean, outlier_info = rep.iqr_outlier_filter_grouped(
+    df_clean, outlier_info = iqr_outlier_filter_grouped(
         renamed_df, group_col="clayBody",
         colnames=["fluctuation_fv", "geom_fv"],
         verbose=True
