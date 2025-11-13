@@ -514,6 +514,30 @@ def audit_reps(df, data_col="data", group_col="name", head=5):
     return out
 
 # ============================================================================
+# HELPER FUNCTION FOR CHECKING
+# ============================================================================
+
+def generate_time_stamp(df):
+    '''
+    Usage:
+    df = generate_time_stamp(df)
+    '''
+    df['Time_Stamp'] = [
+        datetime.fromtimestamp(int(str(oid)[:8], 16)) for oid in df['_id']
+    ]
+
+    #calculates the difference in time between samples
+    df['Time_Elapsed (s)'] = (df['Time_Stamp'] - df['Time_Stamp'].min()).dt.total_seconds()
+
+    # Relative time within each name (in seconds)
+    df['Relative_time_elapsed (s)'] = (
+        df.groupby('name')['Time_Stamp']
+            .transform(lambda s: (s - s.min()).dt.total_seconds())
+    )
+    df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
+    return df
+
+# ============================================================================
 # MASTER FUNCTION
 # ============================================================================
 
