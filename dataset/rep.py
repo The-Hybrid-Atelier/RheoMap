@@ -645,7 +645,7 @@ def clean_data_master(df, TARGET, head=5,DTW_graph = False):
     stacked_df = triplets_extract_features(df_clean_filt, include_weight = False)
 
     if TARGET == 'time':
-        renamed_df = df.rename(columns={
+        renamed_df = stacked_df.rename(columns={
             "name": "trial_identifier",
             "data_stack": "REP_pulses",
             "vuong_sv_stack": "geom_stack",
