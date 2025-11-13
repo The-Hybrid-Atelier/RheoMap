@@ -64,7 +64,11 @@ def median_filter(data, kernel_size=5):
 
 def smooth(pulse, window_size=3):
     """Smooth the pulse using a simple moving average."""
-    return np.convolve(pulse, np.ones(window_size) / window_size, mode='valid')
+    smoothed = np.convolve(pulse, np.ones(window_size) / window_size, mode='valid')
+    # Pad to match original length by repeating edge values
+    pad_left = (window_size - 1) // 2
+    pad_right = window_size - 1 - pad_left
+    return np.pad(smoothed, (pad_left, pad_right), mode='edge')
 
 def wavelet_filter(data, wavelet='db1', level=1):
     """Apply a Wavelet Transform based filter to denoise the data."""
