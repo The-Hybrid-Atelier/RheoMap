@@ -11,7 +11,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ============================================================================
-# UN-USED HEPER FUNCTION
+# UN-USED HELPER FUNCTION
 # ============================================================================
 
 def stack_reps(df, data_col='data', group_size=3, keep_cols=None, material=None, 
