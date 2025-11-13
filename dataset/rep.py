@@ -513,10 +513,6 @@ def audit_reps(df, data_col="data", group_col="name", head=5):
 
     return out
 
-# ============================================================================
-# HELPER FUNCTION FOR CHECKING
-# ============================================================================
-
 def generate_time_stamp(df):
     '''
     Usage:
@@ -574,6 +570,14 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False):
     
     if TARGET not in ['time', 'mixing', 'other']:
         print(f"Warning: TARGET='{TARGET}' is not standard. Using default column naming.")
+    
+    # Generate time-related columns if needed
+    # This is required for TARGET='time' to work properly
+    if '_id' in df.columns:
+        # If Time_Stamp doesn't exist, or if we need time-related columns
+        if 'Time_Stamp' not in df.columns or 'Relative_time_elapsed (s)' not in df.columns:
+            df = generate_time_stamp(df)
+            print("Generated Time_Stamp and time-related columns from MongoDB _id")
     
     audit = audit_reps(df, data_col="data", group_col="name")
 
