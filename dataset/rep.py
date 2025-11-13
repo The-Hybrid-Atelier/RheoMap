@@ -517,8 +517,41 @@ def audit_reps(df, data_col="data", group_col="name", head=5):
 # MASTER FUNCTION
 # ============================================================================
 
-def clean_data_master(df, TARGET, head=5,DTW_graph = False):
-    audit = audit_reps(df,data_col="data", group_col="name")
+def clean_data_master(df, TARGET, head=5, DTW_graph=False):
+    """
+    Master function to clean and process REP sensor data.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        Input dataframe with required columns: 'data', 'name', 'Time_Stamp'
+    TARGET : str
+        One of: 'time', 'mixing', or other (determines output column naming)
+    head : int
+        Number of examples to show in audit (default: 5)
+    DTW_graph : bool
+        Whether to plot DTW graphs (default: False)
+        
+    Returns:
+    --------
+    df_clean : pd.DataFrame
+        Cleaned dataframe with features
+    outlier_info : dict
+        Information about outliers removed
+    """
+    # Input validation
+    if df is None or len(df) == 0:
+        raise ValueError("Input dataframe is empty")
+    
+    required_cols = ['data', 'name', 'Time_Stamp']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+    
+    if TARGET not in ['time', 'mixing', 'other']:
+        print(f"Warning: TARGET='{TARGET}' is not standard. Using default column naming.")
+    
+    audit = audit_reps(df, data_col="data", group_col="name")
 
     modal_len = 22
     # Boolean mask for rows that are not 22
@@ -594,19 +627,23 @@ def clean_data_master(df, TARGET, head=5,DTW_graph = False):
     # Final filtered DF
     df_clean_filt = df_clean.loc[~expanded_bad].reset_index(drop=True)
     if DTW_graph == True:
-        plot_pulse_by_name_sns(df_clean)
+        plot_pulse_by_name_sns(df_clean_filt)
     print("Data After DTW: ")
-    df_clean_filt.groupby('samplingLocation').describe()
+    if 'samplingLocation' in df_clean_filt.columns:
+        print(df_clean_filt.groupby('samplingLocation').describe())
 
 
     df_clean_filt['name'] = ["mixed-5mins" if name == 'mixed-5min' else name for name in df_clean_filt['name'] ]
     # 1. Check that all items in the 'data' column are arrays
     all_are_arrays = df_clean_filt['data'].apply(lambda x: isinstance(x, (np.ndarray, list))).all()
 
-    # 2. Check that all arrays are the same length
+    # 2. Check that all arrays are the same length and filter to length 22
     array_lengths = df_clean_filt['data'].apply(len)
     df_clean_filt = df_clean_filt[array_lengths == 22].reset_index(drop=True)
-    all_same_length = array_lengths.nunique() == 1
+    
+    # 3. Re-check after filtering
+    array_lengths_after = df_clean_filt['data'].apply(len)
+    all_same_length = array_lengths_after.nunique() == 1
 
     if all_same_length and all_are_arrays:
         # Convert to numpy arrays
@@ -616,9 +653,9 @@ def clean_data_master(df, TARGET, head=5,DTW_graph = False):
         print(f"All data entries are arrays/lists? {all_are_arrays}")
         print(f"All data arrays have the same length? {all_same_length}")
         if all_same_length:
-            print(f"Array length: {array_lengths.iloc[0]}")
+            print(f"Array length: {array_lengths_after.iloc[0]}")
         else:
-            print("Lengths found:", array_lengths.value_counts())
+            print("Lengths found:", array_lengths_after.value_counts())
 
     # Description
     name_summary = df_clean_filt.groupby('name').size().reset_index(name='count').sort_values(by='count', ascending=False)
@@ -633,15 +670,13 @@ def clean_data_master(df, TARGET, head=5,DTW_graph = False):
     ax.set_title("CLEANED", fontsize=18)
 
 
-    # Generate feature vectors
-    pulse_col = 'data' # no cleaning
-    # pulse_col = 'vuong_clean'
-
+    # Generate feature vectors from raw data
     df_clean_filt['vuong_sv'] = df_clean_filt['data'].apply(extract_features)
-    df_clean_filt.columns
-    df_clean_filt
 
-
+    # Validate clayBody column exists for stacking
+    if 'clayBody' not in df_clean_filt.columns:
+        raise ValueError("'clayBody' column is required for stacking and feature extraction")
+    
     stacked_df = triplets_extract_features(df_clean_filt, include_weight = False)
 
     if TARGET == 'time':
@@ -703,12 +738,18 @@ def clean_data_master(df, TARGET, head=5,DTW_graph = False):
     has_nan = renamed_df["fluctuation_fv"].apply(lambda arr: np.isnan(arr).any())
     print("Rows with NaN in fluctuation_fv:", has_nan.sum())
 
-    #outlier description
-    dimension = "clayBody"
+    # Final IQR outlier filtering
     df_clean, outlier_info = iqr_outlier_filter_grouped(
         renamed_df, group_col="clayBody",
         colnames=["fluctuation_fv", "geom_fv"],
         verbose=True
     )
+    
+    if len(df_clean) == 0:
+        raise ValueError("All data was filtered out! No samples remaining after cleaning pipeline.")
+    
+    print(f"\n{'='*60}")
+    print(f"PIPELINE COMPLETE: {len(df_clean)} samples ready for ML")
+    print(f"{'='*60}\n")
+    
     return df_clean, outlier_info
-
