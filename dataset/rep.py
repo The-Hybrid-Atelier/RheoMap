@@ -689,6 +689,7 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False):
     fig, ax = plot_lines_by_condition(df_clean_filt, pulse_col="data", condition_col="name")
     ax.set_title("RAW", fontsize=18)
 
+    df_clean_filt_cleaned = df_clean_filt.copy()
     df_clean_filt_cleaned['vuong_clean'] = df_clean_filt['data'].apply(filter_pulse)
     fig, ax = plot_lines_by_condition(df_clean_filt_cleaned, pulse_col="vuong_clean", condition_col="name")
     ax.set_title("CLEANED", fontsize=18)
