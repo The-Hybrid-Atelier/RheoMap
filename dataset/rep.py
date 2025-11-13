@@ -563,14 +563,6 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False):
     if df is None or len(df) == 0:
         raise ValueError("Input dataframe is empty")
     
-    required_cols = ['data', 'name', 'Time_Stamp']
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        raise ValueError(f"Missing required columns: {missing_cols}")
-    
-    if TARGET not in ['time', 'mixing', 'other']:
-        print(f"Warning: TARGET='{TARGET}' is not standard. Using default column naming.")
-    
     # Generate time-related columns if needed
     # This is required for TARGET='time' to work properly
     if '_id' in df.columns:
