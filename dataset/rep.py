@@ -536,12 +536,33 @@ def generate_time_stamp(df):
     )
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
+    
+def balancing_function(df,TARGET):
+    if TARGET == "claybody":
+        #Find the smallest class size
+        class_counts = df["clayBody"].value_counts()
+        min_size = class_counts.min()
 
+        print("Class counts before balancing:\n", class_counts)
+
+        balanced_parts = []
+        for clay, subset in df.groupby("clayBody"):
+            subset_bal = resample(
+                subset,
+                replace=False,
+                n_samples=min_size,
+                random_state=42
+            )
+            balanced_parts.append(subset_bal)
+
+        df_balanced = pd.concat(balanced_parts).reset_index(drop=True)
+        return df_balanced
+    #if TARGET == something else
 # ============================================================================
 # MASTER FUNCTION
 # ============================================================================
 
-def clean_data_master(df, TARGET, head=5, DTW_graph=False):
+def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False):
     """
     Master function to clean and process REP sensor data.
     
@@ -776,5 +797,8 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False):
     print(f"\n{'='*60}")
     print(f"PIPELINE COMPLETE: {len(df_clean)} samples ready for ML")
     print(f"{'='*60}\n")
+
+    if df_balancing == True:
+        df_clean = balancing_function(df_clean,TARGET)
     
     return df_clean, outlier_info
