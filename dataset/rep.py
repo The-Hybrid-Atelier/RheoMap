@@ -558,6 +558,7 @@ def balancing_function(df,TARGET):
             balanced_parts.append(subset_bal)
 
         df_balanced = pd.concat(balanced_parts).reset_index(drop=True)
+        print("Class counts after balancing:\n", df_balanced["clayBody"].value_counts())
         return df_balanced
     #if TARGET == something else
 # ============================================================================
