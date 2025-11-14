@@ -8,6 +8,8 @@ from datetime import datetime
 from fastdtw import fastdtw
 from sklearn.metrics.pairwise import cosine_distances
 import warnings
+from sklearn.utils import resample
+
 warnings.filterwarnings('ignore')
 
 # REP (Retraction-Extrusion Pulse 2 Sensor Vector) 
