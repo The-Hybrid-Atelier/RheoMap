@@ -539,10 +539,9 @@ def generate_time_stamp(df):
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
     
-def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
+def balancing_function(df, TARGET, strategy='smote', target_samples=None, random_state=42):
     """
-    PROFESSIONAL-GRADE class balancing with industry-standard methods.
-    Auto-installs imbalanced-learn if not available.
+    Professional class balancing using imbalanced-learn library.
     
     Parameters:
     -----------
@@ -551,278 +550,187 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
     TARGET : str
         Column name to balance (e.g., 'clayBody')
     strategy : str
-        === TIER 1: SYNTHETIC SAMPLING (BEST) ===
-        'smote' - SMOTE: Synthetic Minority Over-sampling (RECOMMENDED) 
-        'adasyn' - ADASYN: Adaptive Synthetic Sampling 
-        'borderline_smote' - Borderline-SMOTE 
-        'svm_smote' - SVM-SMOTE 
-        
-        === TIER 2: HYBRID CLEANING ===
-        'smote_tomek' - SMOTE + Tomek Links removal 
-        'smote_enn' - SMOTE + Edited Nearest Neighbors 
-        
-        === TIER 3: BASIC (Current) ===
+        'smote' - SMOTE synthetic oversampling (RECOMMENDED)
+        'adasyn' - Adaptive synthetic sampling
+        'borderline_smote' - Borderline SMOTE
+        'smote_tomek' - SMOTE + Tomek links removal
+        'smote_enn' - SMOTE + Edited Nearest Neighbors
         'hybrid' - Undersample large, oversample small
-        'oversample_all' - Oversample minorities 
-        'undersample_all' - Undersample majorities 
-        'undersample_median' - Undersample to median 
+        'oversample_all' - Oversample to majority
+        'undersample_all' - Undersample to minority
+        'undersample_median' - Undersample to median
         'none' - No balancing
-        
     target_samples : int or None
-        For 'hybrid': target samples per class
-        For SMOTE methods: None (auto-balances to majority class)
+        Target samples per class for 'hybrid'
     random_state : int
-        Random seed for reproducibility (default: 42)
+        Random seed (default: 42)
         
     Returns:
     --------
     df_balanced : pd.DataFrame
-        Balanced dataframe with all original columns
+        Balanced dataframe
     """
     
-    # Auto-install imbalanced-learn if needed
+    # Auto-install imbalanced-learn
     try:
-        from imblearn.over_sampling import (
-            RandomOverSampler, 
-            SMOTE, 
-            ADASYN, 
-            BorderlineSMOTE,
-            SVMSMOTE
-        )
+        from imblearn.over_sampling import RandomOverSampler, SMOTE, ADASYN, BorderlineSMOTE
         from imblearn.under_sampling import RandomUnderSampler
         from imblearn.combine import SMOTEENN, SMOTETomek
     except ImportError:
-        print("Installing imbalanced-learn (required for professional balancing)...")
         import subprocess
         import sys
         subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'imbalanced-learn'])
-        from imblearn.over_sampling import (
-            RandomOverSampler, 
-            SMOTE, 
-            ADASYN, 
-            BorderlineSMOTE,
-            SVMSMOTE
-        )
+        from imblearn.over_sampling import RandomOverSampler, SMOTE, ADASYN, BorderlineSMOTE
         from imblearn.under_sampling import RandomUnderSampler
         from imblearn.combine import SMOTEENN, SMOTETomek
     
     if TARGET != "clayBody":
-        print(f"WARNING: TARGET='{TARGET}' doesn't match 'clayBody'. Returning unbalanced data.")
+        print(f"Warning: TARGET '{TARGET}' != 'clayBody'. Returning original data.")
         return df
     
     class_counts = df[TARGET].value_counts()
-    print(f"\n{'='*70}")
-    print(f"PROFESSIONAL CLASS BALANCING - Strategy: {strategy}")
-    print(f"{'='*70}")
-    print("Original class distribution:")
-    print(class_counts)
-    print(f"Total samples: {len(df)}\n")
+    print(f"\nBalancing Strategy: {strategy}")
+    print(f"Original: {len(df)} samples")
     
     if strategy == 'none':
-        print("No balancing applied.")
         return df
     
-    # ---- Prepare X/y for resampling ----
-    print("[1] Preparing data for resampling")
-    feature_cols = [c for c in df.columns if c != TARGET]
-    X = df[feature_cols].reset_index(drop=True)
+    # Prepare features
+    array_feature_cols = []
+    other_feature_cols = []
+    
+    for col in df.columns:
+        if col == TARGET:
+            continue
+        first_val = df[col].iloc[0]
+        if isinstance(first_val, np.ndarray):
+            array_feature_cols.append(col)
+        else:
+            other_feature_cols.append(col)
+    
+    # Expand arrays for SMOTE methods
+    needs_numeric = strategy in ['smote', 'adasyn', 'borderline_smote', 'smote_tomek', 'smote_enn']
+    
+    if needs_numeric and len(array_feature_cols) > 0:
+        # Expand arrays to individual columns
+        expanded_dfs = []
+        for col in array_feature_cols:
+            arrays = np.vstack(df[col].values)
+            col_df = pd.DataFrame(arrays, columns=[f"{col}_{i}" for i in range(arrays.shape[1])])
+            expanded_dfs.append(col_df)
+        
+        X = pd.concat(expanded_dfs, axis=1)
+        if len(other_feature_cols) > 0:
+            X = pd.concat([X, df[other_feature_cols].reset_index(drop=True)], axis=1)
+    else:
+        feature_cols = [c for c in df.columns if c != TARGET]
+        X = df[feature_cols].reset_index(drop=True)
+    
     y = df[TARGET].reset_index(drop=True)
     
-    # Check if features are numeric (required for SMOTE)
-    numeric_cols = X.select_dtypes(include=[np.number]).columns
-    is_all_numeric = len(numeric_cols) == len(X.columns)
-    
-    if not is_all_numeric and strategy in ['smote', 'adasyn', 'borderline_smote', 'svm_smote', 'smote_tomek', 'smote_enn']:
-        print(f"\n⚠️  WARNING: Strategy '{strategy}' requires all numeric features!")
-        print(f"    Found {len(numeric_cols)}/{len(X.columns)} numeric columns.")
-        print(f"    Non-numeric columns: {[c for c in X.columns if c not in numeric_cols]}")
-        print(f"\n    Falling back to 'hybrid' strategy...")
-        strategy = 'hybrid'
-    
-    # ---- Apply resampling strategy ----
+    # Apply strategy
     try:
+        k_neighbors = min(5, class_counts.min() - 1) if class_counts.min() > 1 else 1
+        
         if strategy == 'smote':
-            """
-            SMOTE: Synthetic Minority Over-sampling Technique (INDUSTRY STANDARD)
-            - Creates synthetic samples by interpolating between existing samples
-            - Much better than duplicating data
-            - Gold standard for imbalanced classification
-            """
-            print("[2] Applying SMOTE (Synthetic Minority Over-sampling)")
-            print("    Creating synthetic samples via interpolation...")
-            sampler = SMOTE(random_state=random_state, k_neighbors=min(5, class_counts.min()-1))
+            sampler = SMOTE(random_state=random_state, k_neighbors=k_neighbors)
             X_res, y_res = sampler.fit_resample(X, y)
             
         elif strategy == 'adasyn':
-            """
-            ADASYN: Adaptive Synthetic Sampling
-            - Adaptively generates more synthetic data for harder-to-learn samples
-            - More sophisticated than SMOTE
-            """
-            print("[2] Applying ADASYN (Adaptive Synthetic Sampling)")
-            print("    Adaptively creating synthetic samples...")
-            sampler = ADASYN(random_state=random_state, n_neighbors=min(5, class_counts.min()-1))
+            sampler = ADASYN(random_state=random_state, n_neighbors=k_neighbors)
             X_res, y_res = sampler.fit_resample(X, y)
             
         elif strategy == 'borderline_smote':
-            """
-            Borderline-SMOTE: Only synthesizes borderline minority samples
-            - Focuses on samples near the decision boundary
-            - More efficient than regular SMOTE
-            """
-            print("[2] Applying Borderline-SMOTE")
-            print("    Creating synthetic samples for borderline cases...")
-            sampler = BorderlineSMOTE(random_state=random_state, k_neighbors=min(5, class_counts.min()-1))
-            X_res, y_res = sampler.fit_resample(X, y)
-            
-        elif strategy == 'svm_smote':
-            """
-            SVM-SMOTE: Uses SVM to identify borderline samples
-            - More sophisticated boundary detection
-            """
-            print("[2] Applying SVM-SMOTE ")
-            print("    Using SVM to identify borderline samples...")
-            sampler = SVMSMOTE(random_state=random_state, k_neighbors=min(5, class_counts.min()-1))
+            sampler = BorderlineSMOTE(random_state=random_state, k_neighbors=k_neighbors)
             X_res, y_res = sampler.fit_resample(X, y)
             
         elif strategy == 'smote_tomek':
-            """
-            SMOTETomek: SMOTE + Tomek Links removal
-            - Creates synthetic samples with SMOTE
-            - Then removes Tomek links (pairs of samples from different classes that are close)
-            - Cleans the decision boundary
-            """
-            print("[2] Applying SMOTE + Tomek Links (Hybrid Cleaning) ")
-            print("    [2a] Creating synthetic samples with SMOTE...")
-            print("    [2b] Removing Tomek links to clean boundaries...")
             sampler = SMOTETomek(random_state=random_state, 
-                                smote=SMOTE(k_neighbors=min(5, class_counts.min()-1)))
+                                smote=SMOTE(k_neighbors=k_neighbors, random_state=random_state))
             X_res, y_res = sampler.fit_resample(X, y)
             
         elif strategy == 'smote_enn':
-            """
-            SMOTEENN: SMOTE + Edited Nearest Neighbors
-            - Creates synthetic samples with SMOTE
-            - Then removes samples whose class differs from majority of neighbors
-            - Very aggressive cleaning
-            """
-            print("[2] Applying SMOTE + ENN (Edited Nearest Neighbors) ")
-            print("    [2a] Creating synthetic samples with SMOTE...")
-            print("    [2b] Removing noisy samples with ENN...")
             sampler = SMOTEENN(random_state=random_state,
-                              smote=SMOTE(k_neighbors=min(5, class_counts.min()-1)))
+                              smote=SMOTE(k_neighbors=k_neighbors, random_state=random_state))
             X_res, y_res = sampler.fit_resample(X, y)
             
         elif strategy == 'hybrid':
-            """
-            Hybrid: undersample large, oversample small (basic method)
-            """
-            print(f"[2] Hybrid resampling to target={target_samples} samples per class")
-            
             if target_samples is None:
                 target_samples = 100
             
-            classes_to_undersample = {k: target_samples for k, v in class_counts.items() 
-                                     if v > target_samples}
+            classes_to_undersample = {k: target_samples for k, v in class_counts.items() if v > target_samples}
             if classes_to_undersample:
-                print(f"    [2a] Undersampling {len(classes_to_undersample)} classes...")
-                for class_name, target in classes_to_undersample.items():
-                    print(f"         ↓ {class_name}: {class_counts[class_name]} → {target}")
-                rus = RandomUnderSampler(sampling_strategy=classes_to_undersample, 
-                                        random_state=random_state)
+                rus = RandomUnderSampler(sampling_strategy=classes_to_undersample, random_state=random_state)
                 X, y = rus.fit_resample(X, y)
             
-            classes_to_oversample = {k: target_samples for k, v in class_counts.items() 
-                                    if v < target_samples}
+            classes_to_oversample = {k: target_samples for k, v in class_counts.items() if v < target_samples}
             if classes_to_oversample:
-                print(f"    [2b] Oversampling {len(classes_to_oversample)} classes...")
-                for class_name, target in classes_to_oversample.items():
-                    print(f"         ↑ {class_name}: {class_counts[class_name]} → {target}")
-                ros = RandomOverSampler(sampling_strategy=classes_to_oversample, 
-                                       random_state=random_state)
+                ros = RandomOverSampler(sampling_strategy=classes_to_oversample, random_state=random_state)
                 X, y = ros.fit_resample(X, y)
             
             X_res, y_res = X, y
             
         elif strategy == 'oversample_all':
-            print("[2] Oversampling minority classes to match majority...")
             ros = RandomOverSampler(random_state=random_state)
             X_res, y_res = ros.fit_resample(X, y)
             
         elif strategy == 'undersample_all':
-            print("[2] Undersampling majority classes to match minority...")
             rus = RandomUnderSampler(random_state=random_state)
             X_res, y_res = rus.fit_resample(X, y)
             
         elif strategy == 'undersample_median':
             median_size = int(class_counts.median())
-            print(f"[2] Undersampling to median class size: {median_size}")
-            
-            sampling_strategy = {}
-            for class_name, count in class_counts.items():
-                if count > median_size:
-                    sampling_strategy[class_name] = median_size
-                    print(f"    ↓ {class_name}: {count} → {median_size}")
-                else:
-                    print(f"    = {class_name}: {count} (kept all)")
-            
+            sampling_strategy = {k: median_size for k, v in class_counts.items() if v > median_size}
             if sampling_strategy:
-                rus = RandomUnderSampler(sampling_strategy=sampling_strategy, 
-                                        random_state=random_state)
+                rus = RandomUnderSampler(sampling_strategy=sampling_strategy, random_state=random_state)
                 X_res, y_res = rus.fit_resample(X, y)
             else:
                 X_res, y_res = X, y
-        
         else:
-            raise ValueError(
-                f"Unknown strategy: {strategy}. "
-                "Choose from: 'smote', 'adasyn', 'borderline_smote', 'svm_smote', "
-                "'smote_tomek', 'smote_enn', 'hybrid', 'oversample_all', "
-                "'undersample_all', 'undersample_median', 'none'"
-            )
+            raise ValueError(f"Unknown strategy: {strategy}")
     
     except Exception as e:
-        print(f"\n⚠️  ERROR in {strategy}: {str(e)}")
-        print(f"    This can happen if there are too few samples in minority classes.")
-        print(f"    Falling back to 'hybrid' strategy...")
+        print(f"Error with {strategy}: {e}. Falling back to hybrid.")
+        feature_cols = [c for c in df.columns if c != TARGET]
+        X = df[feature_cols].reset_index(drop=True)
+        y = df[TARGET].reset_index(drop=True)
         
-        # Fallback to hybrid
-        if target_samples is None:
-            target_samples = 100
-        
-        classes_to_undersample = {k: target_samples for k, v in class_counts.items() 
-                                 if v > target_samples}
+        target_samples = target_samples or 100
+        classes_to_undersample = {k: target_samples for k, v in class_counts.items() if v > target_samples}
         if classes_to_undersample:
             rus = RandomUnderSampler(sampling_strategy=classes_to_undersample, random_state=random_state)
             X, y = rus.fit_resample(X, y)
         
-        classes_to_oversample = {k: target_samples for k, v in class_counts.items() 
-                                if v < target_samples}
+        classes_to_oversample = {k: target_samples for k, v in class_counts.items() if v < target_samples}
         if classes_to_oversample:
             ros = RandomOverSampler(sampling_strategy=classes_to_oversample, random_state=random_state)
             X, y = ros.fit_resample(X, y)
         
         X_res, y_res = X, y
     
-    # ---- Reconstruct balanced DataFrame ----
-    print("[3] Reconstructing balanced DataFrame")
-    df_balanced = X_res.copy()
-    df_balanced[TARGET] = y_res
+    # Reconstruct dataframe
+    if needs_numeric and len(array_feature_cols) > 0:
+        df_balanced = pd.DataFrame()
+        df_balanced[TARGET] = y_res
+        
+        col_idx = 0
+        for col in array_feature_cols:
+            orig_array_len = len(df[col].iloc[0])
+            col_data = X_res.iloc[:, col_idx:col_idx + orig_array_len].values
+            df_balanced[col] = [row for row in col_data]
+            col_idx += orig_array_len
+        
+        if len(other_feature_cols) > 0:
+            for col in other_feature_cols:
+                df_balanced[col] = X_res[col].values
+    else:
+        df_balanced = X_res.copy()
+        df_balanced[TARGET] = y_res
     
     # Final report
     final_counts = df_balanced[TARGET].value_counts()
-    print("\n[4] After balancing:")
-    for class_name, count in final_counts.items():
-        print(f"    {class_name}: {count}")
-    print(f"\nTotal samples: {len(df_balanced)}")
-    print(f"Retention rate: {len(df_balanced)}/{len(df)} ({100*len(df_balanced)/len(df):.1f}%)")
-    
-    if strategy in ['smote', 'adasyn', 'borderline_smote', 'svm_smote']:
-        synthetic_samples = len(df_balanced) - len(df)
-        print(f"Synthetic samples created: {synthetic_samples}")
-    
-    print(f"{'='*70}\n")
-    print("[✓] Done. Returning balanced DataFrame.")
+    print(f"Balanced: {len(df_balanced)} samples ({len(df_balanced)/len(df)*100:.1f}%)")
+    print(f"Class distribution: {dict(final_counts)}\n")
     
     return df_balanced
 
