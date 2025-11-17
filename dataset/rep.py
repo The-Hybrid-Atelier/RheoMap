@@ -539,9 +539,9 @@ def generate_time_stamp(df):
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
     
-def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
+def balancing_function(df, TARGET, strategy='ensemble', target_samples=None, random_state=42):
     """
-    Professional class balancing with three main strategies.
+    Professional class balancing for imbalanced datasets.
     
     Parameters:
     -----------
@@ -550,11 +550,17 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
     TARGET : str
         Column name to balance (e.g., 'clayBody')
     strategy : str
-        'class_weight' - No balancing, use with class_weight='balanced' in ML (RECOMMENDED)
-        'hybrid' - RandomUnderSampler + RandomOverSampler (duplicates data)
-        'smote' - SMOTE synthetic oversampling (creates interpolated samples)
-        'oversample_all' - Oversample to majority (duplicates)
-        'undersample_all' - Undersample to minority (removes data)
+        Best for sensor data (no duplicates, no synthetic):
+            'ensemble' - Use BalancedRandomForestClassifier (RECOMMENDED)
+            'tomek' - Remove noisy boundary samples
+            'enn' - Remove misclassified samples
+            'ncr' - Neighborhood cleaning
+            'undersample_smart' - Keep only critical samples
+        Traditional methods (creates duplicates/synthetic):
+            'hybrid' - Under + Oversample
+            'smote' - Synthetic interpolation
+            'oversample_all' - Oversample to majority
+            'undersample_all' - Undersample to minority
     target_samples : int or None
         Target samples per class for 'hybrid' (default: 100)
     random_state : int
@@ -563,51 +569,56 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
     Returns:
     --------
     df_balanced : pd.DataFrame
-        Balanced dataframe (or original if strategy='class_weight')
+        Balanced dataframe
     """
     
     # Auto-install imbalanced-learn
     try:
         from imblearn.over_sampling import RandomOverSampler, SMOTE
-        from imblearn.under_sampling import RandomUnderSampler
+        from imblearn.under_sampling import (
+            RandomUnderSampler, 
+            TomekLinks, 
+            EditedNearestNeighbours,
+            NeighbourhoodCleaningRule,
+            OneSidedSelection
+        )
     except ImportError:
         import subprocess
         import sys
         subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'imbalanced-learn'])
         from imblearn.over_sampling import RandomOverSampler, SMOTE
-        from imblearn.under_sampling import RandomUnderSampler
+        from imblearn.under_sampling import (
+            RandomUnderSampler,
+            TomekLinks,
+            EditedNearestNeighbours, 
+            NeighbourhoodCleaningRule,
+            OneSidedSelection
+        )
     
     if TARGET != "clayBody":
         print(f"Warning: TARGET '{TARGET}' != 'clayBody'. Returning original data.")
         return df
     
     class_counts = df[TARGET].value_counts()
-    print(f"\n{'='*70}")
-    print(f"Balancing Strategy: {strategy}")
-    print(f"{'='*70}")
-    print(f"Original: {len(df)} samples")
-    print(f"Class distribution:\n{class_counts}\n")
+    print(f"\nBalancing: {strategy}")
+    print(f"Original: {len(df)} samples, {len(class_counts)} classes")
     
-    # Strategy 1: CLASS_WEIGHT - No balancing (RECOMMENDED for sensor data)
-    if strategy == 'class_weight':
-        print("✓ No balancing applied - use class_weight='balanced' in your ML model")
-        print("\nExample usage:")
-        print("  from sklearn.ensemble import RandomForestClassifier")
-        print("  clf = RandomForestClassifier(class_weight='balanced')")
-        print(f"{'='*70}\n")
+    # Strategy: ENSEMBLE
+    if strategy == 'ensemble':
+        print("Strategy: No data modification - use BalancedRandomForestClassifier")
+        print("Usage: from imblearn.ensemble import BalancedRandomForestClassifier")
+        print("       clf = BalancedRandomForestClassifier(sampling_strategy='all', replacement=False)\n")
         return df
     
-    # Separate features by type
-    array_feature_info = []  # (col_name, original_shape, n_features)
+    # Prepare features
+    array_feature_info = []
     numeric_feature_cols = []
     string_feature_cols = []
     
     for col in df.columns:
         if col == TARGET:
             continue
-        
         first_val = df[col].iloc[0]
-        
         if isinstance(first_val, np.ndarray):
             orig_shape = first_val.shape
             n_features = int(np.prod(orig_shape))
@@ -617,11 +628,9 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
         else:
             string_feature_cols.append(col)
     
-    # Prepare features
-    needs_expansion = strategy == 'smote'
+    needs_expansion = strategy in ['smote', 'tomek', 'enn', 'ncr', 'undersample_smart']
     
     if needs_expansion and len(array_feature_info) > 0:
-        # Expand arrays to individual columns for SMOTE
         expanded_dfs = []
         for col, orig_shape, n_features in array_feature_info:
             arrays = np.array([arr.flatten() for arr in df[col].values])
@@ -632,61 +641,64 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
         if len(numeric_feature_cols) > 0:
             X = pd.concat([X, df[numeric_feature_cols].reset_index(drop=True)], axis=1)
     else:
-        # For hybrid/oversample/undersample - use original format
         feature_cols = [col[0] for col in array_feature_info] + numeric_feature_cols
         X = df[feature_cols].reset_index(drop=True)
     
     y = df[TARGET].reset_index(drop=True)
-    
-    # Store string columns separately
     string_data = df[string_feature_cols].reset_index(drop=True) if string_feature_cols else None
     
     # Apply strategy
     try:
-        # Strategy 2: HYBRID - Under + Oversample using imbalanced-learn
-        if strategy == 'hybrid':
+        if strategy == 'tomek':
+            print("Removing Tomek Links (noisy boundary samples)")
+            sampler = TomekLinks()
+            X_res, y_res = sampler.fit_resample(X, y)
+            
+        elif strategy == 'enn':
+            print("Edited Nearest Neighbors (removing misclassified samples)")
+            sampler = EditedNearestNeighbours()
+            X_res, y_res = sampler.fit_resample(X, y)
+            
+        elif strategy == 'ncr':
+            print("Neighborhood Cleaning Rule")
+            sampler = NeighbourhoodCleaningRule()
+            X_res, y_res = sampler.fit_resample(X, y)
+            
+        elif strategy == 'undersample_smart':
+            print("One-Sided Selection")
+            sampler = OneSidedSelection(random_state=random_state)
+            X_res, y_res = sampler.fit_resample(X, y)
+        
+        elif strategy == 'hybrid':
             if target_samples is None:
                 target_samples = 100
+            print(f"Hybrid: target={target_samples} per class")
             
-            print(f"Target samples per class: {target_samples}")
-            print("Using imbalanced-learn RandomUnderSampler + RandomOverSampler\n")
-            
-            # Step 1: Undersample classes above target
             classes_to_undersample = {k: target_samples for k, v in class_counts.items() if v > target_samples}
             if classes_to_undersample:
-                print(f"[1] Undersampling {len(classes_to_undersample)} classes:")
-                for class_name, target in classes_to_undersample.items():
-                    print(f"    ↓ {class_name}: {class_counts[class_name]} → {target}")
                 rus = RandomUnderSampler(sampling_strategy=classes_to_undersample, random_state=random_state)
                 X, y = rus.fit_resample(X, y)
             
-            # Step 2: Oversample classes below target
             classes_to_oversample = {k: target_samples for k, v in class_counts.items() if v < target_samples}
             if classes_to_oversample:
-                print(f"\n[2] Oversampling {len(classes_to_oversample)} classes (duplicates):")
-                for class_name, target in classes_to_oversample.items():
-                    print(f"    ↑ {class_name}: {class_counts[class_name]} → {target}")
                 ros = RandomOverSampler(sampling_strategy=classes_to_oversample, random_state=random_state)
                 X, y = ros.fit_resample(X, y)
             
             X_res, y_res = X, y
             
-        # Strategy 3: SMOTE - Synthetic samples
         elif strategy == 'smote':
-            print("Creating synthetic samples via SMOTE interpolation\n")
+            print("SMOTE: creating synthetic samples")
             k_neighbors = min(5, class_counts.min() - 1) if class_counts.min() > 1 else 1
             sampler = SMOTE(random_state=random_state, k_neighbors=k_neighbors)
             X_res, y_res = sampler.fit_resample(X, y)
             
-        # Strategy 4: Oversample all to majority
         elif strategy == 'oversample_all':
-            print("Oversampling all minorities to match majority (duplicates)\n")
+            print("Oversampling to majority")
             ros = RandomOverSampler(random_state=random_state)
             X_res, y_res = ros.fit_resample(X, y)
             
-        # Strategy 5: Undersample all to minority
         elif strategy == 'undersample_all':
-            print("Undersampling all majorities to match minority\n")
+            print("Undersampling to minority")
             rus = RandomUnderSampler(random_state=random_state)
             X_res, y_res = rus.fit_resample(X, y)
             
@@ -694,13 +706,11 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
             raise ValueError(f"Unknown strategy: {strategy}")
     
     except Exception as e:
-        print(f"\n⚠️  Error with {strategy}: {e}")
-        print(f"Returning original data - use class_weight='balanced' in your model\n")
+        print(f"Error: {e}. Returning original data.")
         return df
     
     # Reconstruct dataframe
     if needs_expansion and len(array_feature_info) > 0:
-        # Reconstruct from expanded features
         df_balanced = pd.DataFrame()
         df_balanced[TARGET] = y_res
         
@@ -714,36 +724,33 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
             for col in numeric_feature_cols:
                 df_balanced[col] = X_res[col].values
         
-        # Handle string columns
         if string_data is not None:
-            resample_indices = np.random.choice(len(string_data), size=len(y_res), replace=True)
-            for col in string_feature_cols:
-                df_balanced[col] = string_data[col].iloc[resample_indices].values
+            if len(y_res) <= len(string_data):
+                kept_indices = X_res.index if hasattr(X_res, 'index') else range(len(y_res))
+                for col in string_feature_cols:
+                    df_balanced[col] = string_data[col].iloc[list(kept_indices)].values
+            else:
+                resample_indices = np.random.choice(len(string_data), size=len(y_res), replace=True)
+                for col in string_feature_cols:
+                    df_balanced[col] = string_data[col].iloc[resample_indices].values
     else:
-        # Used original format
         df_balanced = X_res.copy()
         df_balanced[TARGET] = y_res
         
         if string_data is not None:
-            resample_indices = np.random.choice(len(string_data), size=len(y_res), replace=True)
-            for col in string_feature_cols:
-                df_balanced[col] = string_data[col].iloc[resample_indices].values
+            if len(y_res) <= len(string_data):
+                kept_indices = X_res.index if hasattr(X_res, 'index') else range(len(y_res))
+                for col in string_feature_cols:
+                    df_balanced[col] = string_data[col].iloc[list(kept_indices)].values
+            else:
+                resample_indices = np.random.choice(len(string_data), size=len(y_res), replace=True)
+                for col in string_feature_cols:
+                    df_balanced[col] = string_data[col].iloc[resample_indices].values
     
     # Final report
     final_counts = df_balanced[TARGET].value_counts()
-    print(f"\n{'='*70}")
-    print(f"RESULT:")
-    print(f"{'='*70}")
-    print(f"Final: {len(df_balanced)} samples ({len(df_balanced)/len(df)*100:.1f}%)")
-    print(f"Class distribution:\n{final_counts}")
-    
-    if strategy == 'hybrid':
-        print("\n⚠️  Note: Oversampled classes contain duplicate samples")
-    elif strategy == 'smote':
-        synthetic_samples = len(df_balanced) - len(df)
-        print(f"\n✓ Created {synthetic_samples} synthetic samples via interpolation")
-    
-    print(f"{'='*70}\n")
+    print(f"Result: {len(df_balanced)} samples ({len(df_balanced)/len(df)*100:.1f}%)")
+    print(f"Class distribution: {dict(final_counts)}\n")
     
     return df_balanced
 
@@ -778,7 +785,7 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
 # ============================================================================
 
 def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, 
-                      strategy='class_weight', target_samples=None):
+                      balance_strategy='ensemble', balance_target=100):
     """
     Master function to clean and process REP sensor data.
     
@@ -795,8 +802,9 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False,
     df_balancing : bool
         Whether to apply class balancing (default: False)
     balance_strategy : str
-        Balancing strategy: 'hybrid' (recommended), 'oversample_all', 
-        'undersample_all', 'undersample_median', 'none' (default: 'hybrid')
+        Balancing strategy (default: 'ensemble')
+        Options: 'ensemble', 'tomek', 'enn', 'ncr', 'undersample_smart',
+                 'hybrid', 'smote', 'oversample_all', 'undersample_all'
     balance_target : int
         Target samples per class for 'hybrid' strategy (default: 100)
         
@@ -1022,10 +1030,11 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False,
     print(f"{'='*60}\n")
 
     if df_balancing == True:
-        df_clean = balancing_function(df_clean, TARGET, 
-                                      strategy=strategy, 
-                                      target_samples=target_samples)
+        df_clean = balancing_function(
+            df_clean, 
+            TARGET, 
+            strategy=balance_strategy, 
+            target_samples=balance_target
+        )
     
     return df_clean, outlier_info
-
-###
