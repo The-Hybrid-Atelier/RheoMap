@@ -539,7 +539,7 @@ def generate_time_stamp(df):
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
     
-def balancing_function(df, TARGET, strategy='hybrid', target_samples=100, random_state=42):
+def balancing_function(df, TARGET, strategy=strategy, target_samples=target_samples, random_state=42):
     """
     Professional class balancing using imbalanced-learn library.
     Auto-installs imbalanced-learn if not available.
@@ -726,7 +726,7 @@ def balancing_function(df, TARGET, strategy='hybrid', target_samples=100, random
 # ============================================================================
 
 def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, 
-                      balance_strategy='hybrid', balance_target=100):
+                      strategy='hybrid', target_samples=100):
     """
     Master function to clean and process REP sensor data.
     
@@ -971,7 +971,7 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False,
 
     if df_balancing == True:
         df_clean = balancing_function(df_clean, TARGET, 
-                                      strategy=balance_strategy, 
-                                      target_samples=balance_target)
+                                      strategy=strategy, 
+                                      target_samples=target_samples)
     
     return df_clean, outlier_info
