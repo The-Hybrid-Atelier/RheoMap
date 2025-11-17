@@ -539,13 +539,14 @@ def generate_time_stamp(df):
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
     
-def balancing_function(df, TARGET):
-    if TARGET == "clayBody":
-        # Find the smallest class size
+def balancing_function(df,TARGET):
+    if TARGET == "claybody":
+        #Find the smallest class size
         class_counts = df["clayBody"].value_counts()
         min_size = class_counts.min()
+
         print("Class counts before balancing:\n", class_counts)
-        
+
         balanced_parts = []
         for clay, subset in df.groupby("clayBody"):
             subset_bal = resample(
@@ -555,22 +556,16 @@ def balancing_function(df, TARGET):
                 random_state=42
             )
             balanced_parts.append(subset_bal)
-        
+
         df_balanced = pd.concat(balanced_parts).reset_index(drop=True)
         print("Class counts after balancing:\n", df_balanced["clayBody"].value_counts())
         return df_balanced
     #if TARGET == something else
-    else:
-        # Return unbalanced data if TARGET doesn't match
-        print(f"WARNING: Balancing requested but TARGET='{TARGET}' doesn't match 'clayBody'. Returning unbalanced data.")
-        return df
-        
 # ============================================================================
 # MASTER FUNCTION
 # ============================================================================
 
-def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, 
-                      balance_strategy='ensemble', balance_target=None):
+def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False):
     """
     Master function to clean and process REP sensor data.
     
@@ -584,14 +579,6 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False,
         Number of examples to show in audit (default: 5)
     DTW_graph : bool
         Whether to plot DTW graphs (default: False)
-    df_balancing : bool
-        Whether to apply class balancing (default: False)
-    balance_strategy : str
-        Balancing strategy (default: 'ensemble')
-        Options: 'ensemble', 'tomek', 'enn', 'ncr', 'undersample_smart',
-                 'hybrid', 'smote', 'oversample_all', 'undersample_all'
-    balance_target : int
-        Target samples per class for 'hybrid' strategy (default: 100)
         
     Returns:
     --------
