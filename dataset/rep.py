@@ -726,7 +726,7 @@ def balancing_function(df, TARGET, strategy=strategy, target_samples=target_samp
 # ============================================================================
 
 def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, 
-                      strategy='hybrid', target_samples=100):
+                      strategy, target_samples):
     """
     Master function to clean and process REP sensor data.
     
