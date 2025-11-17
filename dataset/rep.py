@@ -539,14 +539,13 @@ def generate_time_stamp(df):
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
     
-def balancing_function(df,TARGET):
+ddef balancing_function(df, TARGET):
     if TARGET == "clayBody":
-        #Find the smallest class size
+        # Find the smallest class size
         class_counts = df["clayBody"].value_counts()
         min_size = class_counts.min()
-
         print("Class counts before balancing:\n", class_counts)
-
+        
         balanced_parts = []
         for clay, subset in df.groupby("clayBody"):
             subset_bal = resample(
@@ -556,11 +555,16 @@ def balancing_function(df,TARGET):
                 random_state=42
             )
             balanced_parts.append(subset_bal)
-
+        
         df_balanced = pd.concat(balanced_parts).reset_index(drop=True)
         print("Class counts after balancing:\n", df_balanced["clayBody"].value_counts())
         return df_balanced
     #if TARGET == something else
+    else:
+        # Return unbalanced data if TARGET doesn't match
+        print(f"WARNING: Balancing requested but TARGET='{TARGET}' doesn't match 'clayBody'. Returning unbalanced data.")
+        return df
+    
 # ============================================================================
 # MASTER FUNCTION
 # ============================================================================
