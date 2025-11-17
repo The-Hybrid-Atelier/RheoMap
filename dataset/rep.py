@@ -539,37 +539,194 @@ def generate_time_stamp(df):
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
     
-def balancing_function(df, TARGET):
-    if TARGET == "clayBody":
-        # Find the smallest class size
-        class_counts = df["clayBody"].value_counts()
-        min_size = class_counts.min()
-        print("Class counts before balancing:\n", class_counts)
+def balancing_function(df, TARGET, strategy='hybrid', target_samples=100, random_state=42):
+    """
+    Professional class balancing using imbalanced-learn library.
+    Auto-installs imbalanced-learn if not available.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        Input dataframe with all features
+    TARGET : str
+        Column name to balance (e.g., 'clayBody')
+    strategy : str
+        'hybrid' - Undersample large, oversample small (RECOMMENDED)
+        'oversample_all' - Oversample all minorities to match majority
+        'undersample_all' - Undersample all majorities to match minority
+        'undersample_median' - Undersample to median class size
+        'none' - No balancing
+    target_samples : int
+        Target samples per class for 'hybrid' strategy (default: 100)
+    random_state : int
+        Random seed for reproducibility (default: 42)
         
-        balanced_parts = []
-        for clay, subset in df.groupby("clayBody"):
-            subset_bal = resample(
-                subset,
-                replace=False,
-                n_samples=min_size,
-                random_state=42
-            )
-            balanced_parts.append(subset_bal)
-        
-        df_balanced = pd.concat(balanced_parts).reset_index(drop=True)
-        print("Class counts after balancing:\n", df_balanced["clayBody"].value_counts())
-        return df_balanced
-    #if TARGET == something else
-    else:
-        # Return unbalanced data if TARGET doesn't match
-        print(f"WARNING: Balancing requested but TARGET='{TARGET}' doesn't match 'clayBody'. Returning unbalanced data.")
+    Returns:
+    --------
+    df_balanced : pd.DataFrame
+        Balanced dataframe with all original columns
+    """
+    
+    # Auto-install imbalanced-learn if needed
+    try:
+        from imblearn.over_sampling import RandomOverSampler
+        from imblearn.under_sampling import RandomUnderSampler
+    except ImportError:
+        print("Installing imbalanced-learn...")
+        import subprocess
+        import sys
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'imbalanced-learn'])
+        from imblearn.over_sampling import RandomOverSampler
+        from imblearn.under_sampling import RandomUnderSampler
+    
+    if TARGET != "clayBody":
+        print(f"WARNING: TARGET='{TARGET}' doesn't match 'clayBody'. Returning unbalanced data.")
         return df
     
+    class_counts = df[TARGET].value_counts()
+    print(f"\n{'='*70}")
+    print(f"CLASS BALANCING - Strategy: {strategy}")
+    print(f"{'='*70}")
+    print("Original class distribution:")
+    print(class_counts)
+    print(f"Total samples: {len(df)}\n")
+    
+    if strategy == 'none':
+        print("No balancing applied.")
+        return df
+    
+    # ---- Prepare X/y for resampling ----
+    print("[1] Preparing data for resampling")
+    feature_cols = [c for c in df.columns if c != TARGET]
+    X = df[feature_cols].reset_index(drop=True)
+    y = df[TARGET].reset_index(drop=True)
+    
+    # ---- Apply resampling strategy ----
+    if strategy == 'hybrid':
+        """
+        Hybrid: undersample large classes, then oversample small classes
+        Sequential application for precise control
+        """
+        print(f"[2] Hybrid resampling to target={target_samples} samples per class")
+        
+        # Step 2a: Undersample classes > target
+        classes_to_undersample = {k: target_samples for k, v in class_counts.items() 
+                                 if v > target_samples}
+        if classes_to_undersample:
+            print(f"    [2a] Undersampling {len(classes_to_undersample)} classes...")
+            for class_name, target in classes_to_undersample.items():
+                print(f"         ↓ {class_name}: {class_counts[class_name]} → {target}")
+            rus = RandomUnderSampler(sampling_strategy=classes_to_undersample, 
+                                    random_state=random_state)
+            X, y = rus.fit_resample(X, y)
+        
+        # Step 2b: Oversample classes < target
+        classes_to_oversample = {k: target_samples for k, v in class_counts.items() 
+                                if v < target_samples}
+        if classes_to_oversample:
+            print(f"    [2b] Oversampling {len(classes_to_oversample)} classes...")
+            for class_name, target in classes_to_oversample.items():
+                print(f"         ↑ {class_name}: {class_counts[class_name]} → {target}")
+            ros = RandomOverSampler(sampling_strategy=classes_to_oversample, 
+                                   random_state=random_state)
+            X, y = ros.fit_resample(X, y)
+        
+        X_res, y_res = X, y
+        
+    elif strategy == 'oversample_all':
+        """
+        Oversample all minority classes to match majority
+        """
+        print("[2] Oversampling minority classes to match majority...")
+        ros = RandomOverSampler(random_state=random_state)
+        X_res, y_res = ros.fit_resample(X, y)
+        
+    elif strategy == 'undersample_all':
+        """
+        Undersample all majority classes to match minority
+        """
+        print("[2] Undersampling majority classes to match minority...")
+        rus = RandomUnderSampler(random_state=random_state)
+        X_res, y_res = rus.fit_resample(X, y)
+        
+    elif strategy == 'undersample_median':
+        """
+        Undersample to median class size
+        """
+        median_size = int(class_counts.median())
+        print(f"[2] Undersampling to median class size: {median_size}")
+        
+        sampling_strategy = {}
+        for class_name, count in class_counts.items():
+            if count > median_size:
+                sampling_strategy[class_name] = median_size
+                print(f"    ↓ {class_name}: {count} → {median_size}")
+            else:
+                print(f"    = {class_name}: {count} (kept all)")
+        
+        if sampling_strategy:
+            rus = RandomUnderSampler(sampling_strategy=sampling_strategy, 
+                                    random_state=random_state)
+            X_res, y_res = rus.fit_resample(X, y)
+        else:
+            X_res, y_res = X, y
+    
+    else:
+        raise ValueError(
+            f"Unknown strategy: {strategy}. "
+            "Choose from: 'hybrid', 'oversample_all', 'undersample_all', "
+            "'undersample_median', 'none'"
+        )
+    
+    # ---- Reconstruct balanced DataFrame ----
+    print("[3] Reconstructing balanced DataFrame")
+    df_balanced = X_res.copy()
+    df_balanced[TARGET] = y_res
+    
+    # Final report
+    final_counts = df_balanced[TARGET].value_counts()
+    print("\n[4] After balancing:")
+    for class_name, count in final_counts.items():
+        print(f"    {class_name}: {count}")
+    print(f"\nTotal samples: {len(df_balanced)}")
+    print(f"Retention rate: {len(df_balanced)}/{len(df)} ({100*len(df_balanced)/len(df):.1f}%)")
+    print(f"{'='*70}\n")
+    print("[✓] Done. Returning balanced DataFrame.")
+    
+    return df_balanced
+
+# def balancing_function(df, TARGET):
+#     if TARGET == "clayBody":
+#         # Find the smallest class size
+#         class_counts = df["clayBody"].value_counts()
+#         min_size = class_counts.min()
+#         print("Class counts before balancing:\n", class_counts)
+        
+#         balanced_parts = []
+#         for clay, subset in df.groupby("clayBody"):
+#             subset_bal = resample(
+#                 subset,
+#                 replace=False,
+#                 n_samples=min_size,
+#                 random_state=42
+#             )
+#             balanced_parts.append(subset_bal)
+        
+#         df_balanced = pd.concat(balanced_parts).reset_index(drop=True)
+#         print("Class counts after balancing:\n", df_balanced["clayBody"].value_counts())
+#         return df_balanced
+#     #if TARGET == something else
+#     else:
+#         # Return unbalanced data if TARGET doesn't match
+#         print(f"WARNING: Balancing requested but TARGET='{TARGET}' doesn't match 'clayBody'. Returning unbalanced data.")
+#         return df
+        
 # ============================================================================
 # MASTER FUNCTION
 # ============================================================================
 
-def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False):
+def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, 
+                      balance_strategy='hybrid', balance_target=100):
     """
     Master function to clean and process REP sensor data.
     
@@ -583,6 +740,13 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False):
         Number of examples to show in audit (default: 5)
     DTW_graph : bool
         Whether to plot DTW graphs (default: False)
+    df_balancing : bool
+        Whether to apply class balancing (default: False)
+    balance_strategy : str
+        Balancing strategy: 'hybrid' (recommended), 'oversample_all', 
+        'undersample_all', 'undersample_median', 'none' (default: 'hybrid')
+    balance_target : int
+        Target samples per class for 'hybrid' strategy (default: 100)
         
     Returns:
     --------
@@ -806,6 +970,8 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False):
     print(f"{'='*60}\n")
 
     if df_balancing == True:
-        df_clean = balancing_function(df_clean,TARGET)
+        df_clean = balancing_function(df_clean, TARGET, 
+                                      strategy=balance_strategy, 
+                                      target_samples=balance_target)
     
     return df_clean, outlier_info
