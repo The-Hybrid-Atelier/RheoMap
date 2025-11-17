@@ -542,7 +542,7 @@ def generate_time_stamp(df):
 def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
     """
     Professional class balancing using imbalanced-learn library.
-    Handles 2D array features (like REP_pulses with shape (k, n)).
+    Handles 2D array features and excludes non-numeric columns.
     """
     
     # Auto-install imbalanced-learn
@@ -569,21 +569,28 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
     if strategy == 'none':
         return df
     
-    # Prepare features - track array shapes for reconstruction
-    array_feature_info = []  # Store (col_name, original_shape, n_features)
-    other_feature_cols = []
+    # Separate features by type
+    array_feature_info = []  # (col_name, original_shape, n_features)
+    numeric_feature_cols = []
+    string_feature_cols = []
     
     for col in df.columns:
         if col == TARGET:
             continue
+        
         first_val = df[col].iloc[0]
+        
         if isinstance(first_val, np.ndarray):
-            # Store original shape
+            # Array column - will be expanded
             orig_shape = first_val.shape
-            n_features = np.prod(orig_shape)  # Total number of elements
+            n_features = int(np.prod(orig_shape))
             array_feature_info.append((col, orig_shape, n_features))
+        elif isinstance(first_val, (int, float, np.number)):
+            # Numeric scalar
+            numeric_feature_cols.append(col)
         else:
-            other_feature_cols.append(col)
+            # String or other - preserve but don't use as feature
+            string_feature_cols.append(col)
     
     # Expand arrays for SMOTE methods
     needs_numeric = strategy in ['smote', 'adasyn', 'borderline_smote', 'smote_tomek', 'smote_enn']
@@ -592,19 +599,24 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
         # Expand arrays to individual columns
         expanded_dfs = []
         for col, orig_shape, n_features in array_feature_info:
-            # Flatten each array to 1D, then create columns
             arrays = np.array([arr.flatten() for arr in df[col].values])
             col_df = pd.DataFrame(arrays, columns=[f"{col}_{i}" for i in range(n_features)])
             expanded_dfs.append(col_df)
         
         X = pd.concat(expanded_dfs, axis=1)
-        if len(other_feature_cols) > 0:
-            X = pd.concat([X, df[other_feature_cols].reset_index(drop=True)], axis=1)
+        
+        # Add numeric scalar features
+        if len(numeric_feature_cols) > 0:
+            X = pd.concat([X, df[numeric_feature_cols].reset_index(drop=True)], axis=1)
     else:
-        feature_cols = [c for c in df.columns if c != TARGET]
-        X = df[feature_cols].reset_index(drop=True)
+        # For non-SMOTE methods, use arrays as-is (will be passed as objects)
+        feature_cols = array_feature_info + [(c, None, None) for c in numeric_feature_cols]
+        X = df[[col[0] for col in array_feature_info] + numeric_feature_cols].reset_index(drop=True)
     
     y = df[TARGET].reset_index(drop=True)
+    
+    # Store string columns separately
+    string_data = df[string_feature_cols].reset_index(drop=True) if string_feature_cols else None
     
     # Apply strategy
     try:
@@ -669,9 +681,11 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
     
     except Exception as e:
         print(f"Error with {strategy}: {e}. Falling back to hybrid.")
-        feature_cols = [c for c in df.columns if c != TARGET]
-        X = df[feature_cols].reset_index(drop=True)
+        
+        # Rebuild features for hybrid fallback - use original non-expanded arrays
+        X = df[[col[0] for col in array_feature_info] + numeric_feature_cols].reset_index(drop=True)
         y = df[TARGET].reset_index(drop=True)
+        needs_numeric = False  # Flag to skip reshape reconstruction
         
         target_samples = target_samples or 100
         classes_to_undersample = {k: target_samples for k, v in class_counts.items() if v > target_samples}
@@ -688,31 +702,44 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
     
     # Reconstruct dataframe
     if needs_numeric and len(array_feature_info) > 0:
+        # We used expanded features - need to reconstruct arrays
         df_balanced = pd.DataFrame()
         df_balanced[TARGET] = y_res
         
         col_idx = 0
         for col, orig_shape, n_features in array_feature_info:
-            # Extract the flattened data
             col_data = X_res.iloc[:, col_idx:col_idx + n_features].values
-            # Reshape back to original shape
             df_balanced[col] = [row.reshape(orig_shape) for row in col_data]
             col_idx += n_features
         
-        if len(other_feature_cols) > 0:
-            for col in other_feature_cols:
+        # Add numeric scalar features
+        if len(numeric_feature_cols) > 0:
+            for col in numeric_feature_cols:
                 df_balanced[col] = X_res[col].values
+        
+        # Handle string columns - resample using indices
+        if string_data is not None:
+            # Sample randomly from original string data
+            resample_indices = np.random.choice(len(string_data), size=len(y_res), replace=True)
+            for col in string_feature_cols:
+                df_balanced[col] = string_data[col].iloc[resample_indices].values
     else:
+        # Used original arrays (hybrid/oversample/undersample)
         df_balanced = X_res.copy()
         df_balanced[TARGET] = y_res
+        
+        # Add string columns
+        if string_data is not None:
+            resample_indices = np.random.choice(len(string_data), size=len(y_res), replace=True)
+            for col in string_feature_cols:
+                df_balanced[col] = string_data[col].iloc[resample_indices].values
     
     # Final report
     final_counts = df_balanced[TARGET].value_counts()
     print(f"Balanced: {len(df_balanced)} samples ({len(df_balanced)/len(df)*100:.1f}%)")
     print(f"Class distribution: {dict(final_counts)}\n")
     
-    return df_balanced
-    
+    return df_balanced    
 # def balancing_function(df, TARGET):
 #     if TARGET == "clayBody":
 #         # Find the smallest class size
