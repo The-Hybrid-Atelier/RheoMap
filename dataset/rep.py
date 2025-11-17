@@ -539,7 +539,7 @@ def generate_time_stamp(df):
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
     
-def balancing_function(df, TARGET, strategy='smote', target_samples=None, random_state=42):
+def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
     """
     Professional class balancing using imbalanced-learn library.
     
