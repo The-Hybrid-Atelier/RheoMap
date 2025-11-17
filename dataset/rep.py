@@ -542,33 +542,7 @@ def generate_time_stamp(df):
 def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
     """
     Professional class balancing using imbalanced-learn library.
-    
-    Parameters:
-    -----------
-    df : pd.DataFrame
-        Input dataframe with all features
-    TARGET : str
-        Column name to balance (e.g., 'clayBody')
-    strategy : str
-        'smote' - SMOTE synthetic oversampling (RECOMMENDED)
-        'adasyn' - Adaptive synthetic sampling
-        'borderline_smote' - Borderline SMOTE
-        'smote_tomek' - SMOTE + Tomek links removal
-        'smote_enn' - SMOTE + Edited Nearest Neighbors
-        'hybrid' - Undersample large, oversample small
-        'oversample_all' - Oversample to majority
-        'undersample_all' - Undersample to minority
-        'undersample_median' - Undersample to median
-        'none' - No balancing
-    target_samples : int or None
-        Target samples per class for 'hybrid'
-    random_state : int
-        Random seed (default: 42)
-        
-    Returns:
-    --------
-    df_balanced : pd.DataFrame
-        Balanced dataframe
+    Handles 2D array features (like REP_pulses with shape (k, n)).
     """
     
     # Auto-install imbalanced-learn
@@ -595,8 +569,8 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
     if strategy == 'none':
         return df
     
-    # Prepare features
-    array_feature_cols = []
+    # Prepare features - track array shapes for reconstruction
+    array_feature_info = []  # Store (col_name, original_shape, n_features)
     other_feature_cols = []
     
     for col in df.columns:
@@ -604,19 +578,23 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
             continue
         first_val = df[col].iloc[0]
         if isinstance(first_val, np.ndarray):
-            array_feature_cols.append(col)
+            # Store original shape
+            orig_shape = first_val.shape
+            n_features = np.prod(orig_shape)  # Total number of elements
+            array_feature_info.append((col, orig_shape, n_features))
         else:
             other_feature_cols.append(col)
     
     # Expand arrays for SMOTE methods
     needs_numeric = strategy in ['smote', 'adasyn', 'borderline_smote', 'smote_tomek', 'smote_enn']
     
-    if needs_numeric and len(array_feature_cols) > 0:
+    if needs_numeric and len(array_feature_info) > 0:
         # Expand arrays to individual columns
         expanded_dfs = []
-        for col in array_feature_cols:
-            arrays = np.vstack(df[col].values)
-            col_df = pd.DataFrame(arrays, columns=[f"{col}_{i}" for i in range(arrays.shape[1])])
+        for col, orig_shape, n_features in array_feature_info:
+            # Flatten each array to 1D, then create columns
+            arrays = np.array([arr.flatten() for arr in df[col].values])
+            col_df = pd.DataFrame(arrays, columns=[f"{col}_{i}" for i in range(n_features)])
             expanded_dfs.append(col_df)
         
         X = pd.concat(expanded_dfs, axis=1)
@@ -709,16 +687,17 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
         X_res, y_res = X, y
     
     # Reconstruct dataframe
-    if needs_numeric and len(array_feature_cols) > 0:
+    if needs_numeric and len(array_feature_info) > 0:
         df_balanced = pd.DataFrame()
         df_balanced[TARGET] = y_res
         
         col_idx = 0
-        for col in array_feature_cols:
-            orig_array_len = len(df[col].iloc[0])
-            col_data = X_res.iloc[:, col_idx:col_idx + orig_array_len].values
-            df_balanced[col] = [row for row in col_data]
-            col_idx += orig_array_len
+        for col, orig_shape, n_features in array_feature_info:
+            # Extract the flattened data
+            col_data = X_res.iloc[:, col_idx:col_idx + n_features].values
+            # Reshape back to original shape
+            df_balanced[col] = [row.reshape(orig_shape) for row in col_data]
+            col_idx += n_features
         
         if len(other_feature_cols) > 0:
             for col in other_feature_cols:
@@ -733,7 +712,7 @@ def balancing_function(df, TARGET, strategy, target_samples, random_state=42):
     print(f"Class distribution: {dict(final_counts)}\n")
     
     return df_balanced
-
+    
 # def balancing_function(df, TARGET):
 #     if TARGET == "clayBody":
 #         # Find the smallest class size
