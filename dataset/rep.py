@@ -539,7 +539,7 @@ def generate_time_stamp(df):
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
     
-ddef balancing_function(df, TARGET):
+def balancing_function(df, TARGET):
     if TARGET == "clayBody":
         # Find the smallest class size
         class_counts = df["clayBody"].value_counts()
