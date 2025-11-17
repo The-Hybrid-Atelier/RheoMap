@@ -540,7 +540,7 @@ def generate_time_stamp(df):
     return df
     
 def balancing_function(df,TARGET):
-    if TARGET == "claybody":
+    if TARGET == "clayBody":
         #Find the smallest class size
         class_counts = df["clayBody"].value_counts()
         min_size = class_counts.min()
