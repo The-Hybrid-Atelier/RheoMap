@@ -541,7 +541,7 @@ def generate_time_stamp(df):
     
 from sklearn.utils import resample
 
-def balancing_function(df, TARGET, min_class_size=5):
+def balancing_function(df, TARGET, min_class_size=14):
     # Select label column based on TARGET
     if TARGET == "clayBody":
         label_col = "clayBody"
