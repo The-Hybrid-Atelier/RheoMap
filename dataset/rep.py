@@ -607,7 +607,7 @@ def balancing_function(df, TARGET, df_balancing = False, min_class_size=10):
 # MASTER FUNCTION
 # ============================================================================
 
-def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False):
+def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, min_class_size = 10):
     """
     Master function to clean and process REP sensor data.
     
@@ -843,6 +843,6 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False):
     print(f"PIPELINE COMPLETE: {len(df_clean)} samples ready for ML")
     print(f"{'='*60}\n")
 
-    df_clean = balancing_function(df_clean,TARGET,df_balancing)
+    df_clean = balancing_function(df_clean,TARGET,df_balancing,min_class_size)
     
     return df_clean, outlier_info
