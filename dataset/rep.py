@@ -539,30 +539,67 @@ def generate_time_stamp(df):
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
     
-def balancing_function(df,TARGET):
+from sklearn.utils import resample
+
+def balancing_function(df, TARGET, min_class_size=5):
+    # Select label column based on TARGET
     if TARGET == "clayBody":
-        #Find the smallest class size
-        class_counts = df["clayBody"].value_counts()
-        min_size = class_counts.min()
-        print("Class counts before balancing:\n", class_counts)
-        balanced_parts = []
-        for clay, subset in df.groupby("clayBody"):
+        label_col = "clayBody"
+        do_balance = True
+
+    elif TARGET == "water_added":
+        label_col = "name"
+        do_balance = True
+
+    else:
+        print(f"[INFO] TARGET='{TARGET}' not recognized → no filtering/balancing applied.")
+        return df.copy()
+
+    # -----------------------------
+    #Filter out rare classes regardless of whether we balance or not
+    # -----------------------------
+    class_counts = df[label_col].value_counts()
+    valid_classes = class_counts[class_counts >= min_class_size].index.tolist()
+
+    print("\n=== Class counts before filtering ===")
+    print(class_counts)
+
+    print(f"\nDropping classes with < {min_class_size} samples: {set(class_counts.index) - set(valid_classes)}")
+
+    df_filtered = df[df[label_col].isin(valid_classes)].copy()
+
+    print("\n=== Class counts after filtering ===")
+    print(df_filtered[label_col].value_counts())
+
+    # If fewer than 2 classes remain, no balancing possible
+    if len(valid_classes) < 2:
+        print("\n[WARNING] <2 remaining valid classes → returning filtered dataset only.")
+        return df_filtered.reset_index(drop=True)
+
+    # -----------------------------
+    #Perform balancing
+    # -----------------------------
+    if do_balance:
+        min_size = df_filtered[label_col].value_counts().min()
+
+        balanced_chunks = []
+        for lbl, subset in df_filtered.groupby(label_col):
             subset_bal = resample(
                 subset,
                 replace=False,
                 n_samples=min_size,
                 random_state=42
             )
-            balanced_parts.append(subset_bal)
+            balanced_chunks.append(subset_bal)
 
-        df_balanced = pd.concat(balanced_parts).reset_index(drop=True)
-        print("Class counts after balancing:\n", df_balanced["clayBody"].value_counts())
+        df_balanced = pd.concat(balanced_chunks).reset_index(drop=True)
+
+        print("\n=== Class counts after balancing ===")
+        print(df_balanced[label_col].value_counts())
+
         return df_balanced
-    #if TARGET == something else
-    else:
-        # Return unbalanced data if TARGET doesn't match
-        print(f"WARNING: Balancing requested but TARGET='{TARGET}' doesn't match 'clayBody'. Returning unbalanced data.")
-        return df
+
+    return df_filtered.reset_index(drop=True)
 
         
 # ============================================================================
