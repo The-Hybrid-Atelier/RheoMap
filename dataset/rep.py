@@ -541,20 +541,21 @@ def generate_time_stamp(df):
     
 from sklearn.utils import resample
 
-def balancing_function(df, TARGET, min_class_size=14):
+def balancing_function(df, TARGET, df_balancing = False, min_class_size=10):
     # Select label column based on TARGET
     if TARGET == "clayBody":
         label_col = "clayBody"
-        do_balance = True
+        do_balance = df_balancing
 
     elif TARGET == "water_added":
         label_col = "name"
-        do_balance = True
+        do_balance = df_balancing
 
     else:
         print(f"[INFO] TARGET='{TARGET}' not recognized → no filtering/balancing applied.")
         return df.copy()
-
+        
+    df[label_col] = df[label_col].astype(str)
     # -----------------------------
     #Filter out rare classes regardless of whether we balance or not
     # -----------------------------
@@ -842,7 +843,6 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False):
     print(f"PIPELINE COMPLETE: {len(df_clean)} samples ready for ML")
     print(f"{'='*60}\n")
 
-    if df_balancing == True:
-        df_clean = balancing_function(df_clean,TARGET)
+    df_clean = balancing_function(df_clean,TARGET,df_balancing)
     
     return df_clean, outlier_info
