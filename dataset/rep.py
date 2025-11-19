@@ -904,14 +904,6 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, m
             "vuong_fv": "geom_fv",
             "matnoise_fv": "fluctuation_fv"
         })
-        renamed_df = renamed_df[[
-            "clayBody",
-            "name",
-            "REP_pulses",
-            "geom_stack",
-            "geom_fv",
-            "fluctuation_fv"
-        ]]
 
     has_nan = renamed_df["fluctuation_fv"].apply(lambda arr: np.isnan(arr).any())
     print("Rows with NaN in fluctuation_fv:", has_nan.sum())
