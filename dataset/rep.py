@@ -383,22 +383,22 @@ def generate_stacked_dataset_triplets(df, k=3, group_cols=('name', 'clayBody'), 
                 row['trial_stack']    = trip['trial'].to_numpy()
 
             if 'clay_g' in trip.columns:
-                row['clay_g'] = trip['clay_g'].to_numpy()
+                row['clay_g'] = trip['clay_g'].mean()
 
             if 'specific_gravity_g_cm3' in trip.columns:
-                row['specific_gravity_g_cm3'] = trip['specific_gravity_g_cm3'].to_numpy()
+                row['specific_gravity_g_cm3'] = trip['specific_gravity_g_cm3'].mean()
 
             if 'state' in trip.columns:
                 row['state'] = trip['state'].to_numpy()
 
             if 'water_ml' in trip.columns:
-                 row['water_ml'] = trip['water_ml'].to_numpy()
+                 row['water_ml'] = trip['water_ml'].mean()
 
             if 'weight_of_60ml_sample_g' in trip.columns:
-                row['weight_of_60ml_sample_g'] = trip['weight_of_60ml_sample_g'].to_numpy()
+                row['weight_of_60ml_sample_g'] = trip['weight_of_60ml_sample_g'].mean()
 
             if 'water_added_ml' in trip.columns:
-                row['water_added_ml'] = trip['water_added_ml'].to_numpy()
+                row['water_added_ml'] = trip['water_added_ml'].mean()
                 
             if include_weight:
                 if 'estimated_weight' in trip.columns:
