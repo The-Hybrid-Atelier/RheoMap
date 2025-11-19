@@ -539,7 +539,7 @@ def generate_time_stamp(df):
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
 
-def balancing_function(df, TARGET, df_balancing=False, min_class_size=10):
+def balancing_function(df, TARGET, df_balancing = False, min_class_size=10):
     # Select label column based on TARGET
     if TARGET == "clayBody":
         label_col = "clayBody"
@@ -554,26 +554,16 @@ def balancing_function(df, TARGET, df_balancing=False, min_class_size=10):
         return df.copy()
 
     df[label_col] = df[label_col].astype(str)
-
-    # Always show class counts for debugging
+    # -----------------------------
+    #Filter out rare classes regardless of whether we balance or not
+    # -----------------------------
     class_counts = df[label_col].value_counts()
-    print("\n=== Class counts (before any filtering/balancing) ===")
-    print(class_counts)
-
-    # -------------------------------------------------
-    # Inference / no-balancing case: DON'T drop classes
-    # -------------------------------------------------
-    if not do_balance:
-        print("[INFO] df_balancing=False → skipping rare-class filtering and balancing.")
-        return df.reset_index(drop=True)
-
-    # -------------------------------------------------
-    # Training / balancing case: filter rare classes and balance
-    # -------------------------------------------------
     valid_classes = class_counts[class_counts >= min_class_size].index.tolist()
 
-    print(f"\nDropping classes with < {min_class_size} samples: "
-          f"{set(class_counts.index) - set(valid_classes)}")
+    print("\n=== Class counts before filtering ===")
+    print(class_counts)
+
+    print(f"\nDropping classes with < {min_class_size} samples: {set(class_counts.index) - set(valid_classes)}")
 
     df_filtered = df[df[label_col].isin(valid_classes)].copy()
 
@@ -585,7 +575,9 @@ def balancing_function(df, TARGET, df_balancing=False, min_class_size=10):
         print("\n[WARNING] <2 remaining valid classes → returning filtered dataset only.")
         return df_filtered.reset_index(drop=True)
 
-    # Perform balancing
+    # -----------------------------
+    #Perform balancing
+    # -----------------------------
     if do_balance:
         min_size = df_filtered[label_col].value_counts().min()
 
@@ -606,10 +598,9 @@ def balancing_function(df, TARGET, df_balancing=False, min_class_size=10):
 
         return df_balanced
 
-    # Fallback (shouldn't be hit, but keep it safe)
     return df_filtered.reset_index(drop=True)
 
-        
+
 # ============================================================================
 # MASTER FUNCTION
 # ============================================================================
@@ -617,7 +608,7 @@ def balancing_function(df, TARGET, df_balancing=False, min_class_size=10):
 def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, min_class_size = 10):
     """
     Master function to clean and process REP sensor data.
-    
+
     Parameters:
     -----------
     df : pd.DataFrame
@@ -628,7 +619,7 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, m
         Number of examples to show in audit (default: 5)
     DTW_graph : bool
         Whether to plot DTW graphs (default: False)
-        
+
     Returns:
     --------
     df_clean : pd.DataFrame
@@ -639,7 +630,7 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, m
     # Input validation
     if df is None or len(df) == 0:
         raise ValueError("Input dataframe is empty")
-    
+
     # Generate time-related columns if needed
     # This is required for TARGET='time' to work properly
     if '_id' in df.columns:
@@ -647,7 +638,7 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, m
         if 'Time_Stamp' not in df.columns or 'Relative_time_elapsed (s)' not in df.columns:
             df = generate_time_stamp(df)
             print("Generated Time_Stamp and time-related columns from MongoDB _id")
-    
+
     audit = audit_reps(df, data_col="data", group_col="name")
 
     modal_len = 22
@@ -737,7 +728,7 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, m
     # 2. Check that all arrays are the same length and filter to length 22
     array_lengths = df_clean_filt['data'].apply(len)
     df_clean_filt = df_clean_filt[array_lengths == 22].reset_index(drop=True)
-    
+
     # 3. Re-check after filtering
     array_lengths_after = df_clean_filt['data'].apply(len)
     all_same_length = array_lengths_after.nunique() == 1
@@ -774,7 +765,7 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, m
     # Validate clayBody column exists for stacking
     if 'clayBody' not in df_clean_filt.columns:
         raise ValueError("'clayBody' column is required for stacking and feature extraction")
-    
+
     stacked_df = triplets_extract_features(df_clean_filt, include_weight = False)
 
     if TARGET == 'time':
@@ -842,14 +833,14 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, m
         colnames=["fluctuation_fv", "geom_fv"],
         verbose=True
     )
-    
+
     if len(df_clean) == 0:
         raise ValueError("All data was filtered out! No samples remaining after cleaning pipeline.")
-    
+
     print(f"\n{'='*60}")
     print(f"PIPELINE COMPLETE: {len(df_clean)} samples ready for ML")
     print(f"{'='*60}\n")
 
     df_clean = balancing_function(df_clean,TARGET,df_balancing,min_class_size)
-    
+
     return df_clean, outlier_info
