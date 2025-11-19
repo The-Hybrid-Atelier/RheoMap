@@ -538,10 +538,8 @@ def generate_time_stamp(df):
     )
     df = df.sort_values(by=["name", "Relative_time_elapsed (s)"]).reset_index(drop=True)
     return df
-    
-from sklearn.utils import resample
 
-def balancing_function(df, TARGET, df_balancing = False, min_class_size=10):
+def balancing_function(df, TARGET, df_balancing=False, min_class_size=10):
     # Select label column based on TARGET
     if TARGET == "clayBody":
         label_col = "clayBody"
@@ -554,18 +552,28 @@ def balancing_function(df, TARGET, df_balancing = False, min_class_size=10):
     else:
         print(f"[INFO] TARGET='{TARGET}' not recognized → no filtering/balancing applied.")
         return df.copy()
-        
-    df[label_col] = df[label_col].astype(str)
-    # -----------------------------
-    #Filter out rare classes regardless of whether we balance or not
-    # -----------------------------
-    class_counts = df[label_col].value_counts()
-    valid_classes = class_counts[class_counts >= min_class_size].index.tolist()
 
-    print("\n=== Class counts before filtering ===")
+    df[label_col] = df[label_col].astype(str)
+
+    # Always show class counts for debugging
+    class_counts = df[label_col].value_counts()
+    print("\n=== Class counts (before any filtering/balancing) ===")
     print(class_counts)
 
-    print(f"\nDropping classes with < {min_class_size} samples: {set(class_counts.index) - set(valid_classes)}")
+    # -------------------------------------------------
+    # Inference / no-balancing case: DON'T drop classes
+    # -------------------------------------------------
+    if not do_balance:
+        print("[INFO] df_balancing=False → skipping rare-class filtering and balancing.")
+        return df.reset_index(drop=True)
+
+    # -------------------------------------------------
+    # Training / balancing case: filter rare classes and balance
+    # -------------------------------------------------
+    valid_classes = class_counts[class_counts >= min_class_size].index.tolist()
+
+    print(f"\nDropping classes with < {min_class_size} samples: "
+          f"{set(class_counts.index) - set(valid_classes)}")
 
     df_filtered = df[df[label_col].isin(valid_classes)].copy()
 
@@ -577,9 +585,7 @@ def balancing_function(df, TARGET, df_balancing = False, min_class_size=10):
         print("\n[WARNING] <2 remaining valid classes → returning filtered dataset only.")
         return df_filtered.reset_index(drop=True)
 
-    # -----------------------------
-    #Perform balancing
-    # -----------------------------
+    # Perform balancing
     if do_balance:
         min_size = df_filtered[label_col].value_counts().min()
 
@@ -600,6 +606,7 @@ def balancing_function(df, TARGET, df_balancing = False, min_class_size=10):
 
         return df_balanced
 
+    # Fallback (shouldn't be hit, but keep it safe)
     return df_filtered.reset_index(drop=True)
 
         
