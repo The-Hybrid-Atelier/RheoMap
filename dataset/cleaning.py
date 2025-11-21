@@ -12,6 +12,15 @@ from sklearn.utils import resample
 
 warnings.filterwarnings('ignore')
 
+def _as_1d(x):
+    a = np.asarray(x, dtype=float)
+    a = np.squeeze(a)
+    if a.ndim > 1:
+        a = a.ravel()
+    if a.ndim != 1:
+        raise ValueError(f"Sequence not 1-D after squeeze: shape={a.shape}")
+    return a
+    
 def expand_drop_to_clusters(df, bad_mask, group_col="name", time_col="Time_Stamp", seconds=10):
     """
     Expand per-row 'bad' mask to include any rows within ±seconds
