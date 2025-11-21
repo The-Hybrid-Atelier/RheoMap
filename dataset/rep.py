@@ -3,8 +3,6 @@ import pandas as pd
 import pywt
 from scipy.signal import medfilt
 
-warnings.filterwarnings('ignore')
-
 def median_filter(data, kernel_size=5):
     """Apply a median filter to the data."""
     return medfilt(data, kernel_size)
