@@ -137,6 +137,7 @@ def plot_pulse_by_name_sns(
                 data=stats,
                 x="time_idx",
                 y="mean",
+                hue="name",
                 linewidth=linewidth + 1.5,
                 color="tab:blue",
                 ax=ax
