@@ -21,7 +21,51 @@ def _as_1d(x):
     if a.ndim != 1:
         raise ValueError(f"Sequence not 1-D after squeeze: shape={a.shape}")
     return a
-    
+def detect_outliers_dtw(df, data_col="data", method="mad", k=3.0, pct=90, verbose=True):
+    """
+    DTW outlier detection assuming equal-length 1-D sequences in df[data_col].
+    Uses scalar-safe distance |a-b| to avoid scipy.euclidean 1-D checks.
+    Returns: dists (np.ndarray), threshold (float), keep_mask (np.ndarray[bool])
+    """
+    # Canonicalize to 1-D arrays
+    seqs = [ _as_1d(x) for x in df[data_col].values ]
+
+    # Verify equal lengths
+    lens = [len(s) for s in seqs]
+    Lset = sorted(set(lens))
+    if len(Lset) != 1:
+        raise ValueError(f"Sequences not equal length: found lengths {Lset}. "
+                         "Make them uniform first (trim/pad/drop).")
+
+    # Reference = median curve
+    arrs = np.vstack([s for s in seqs])  # (n, L)
+    ref = np.median(arrs, axis=0)
+
+    # Scalar-safe distance
+    dist_scalar = lambda a, b: abs(a - b)
+
+    # DTW distances
+    dists = np.empty(len(seqs), dtype=float)
+    for i, s in enumerate(seqs):
+        d, _ = fastdtw(s, ref, dist=dist_scalar)
+        dists[i] = d
+
+    # Threshold
+    if method == "mad":
+        med = np.median(dists)
+        mad = np.median(np.abs(dists - med)) + 1e-12
+        thr = med + k * mad
+    elif method == "percentile":
+        thr = np.percentile(dists, pct)
+    else:
+        raise ValueError("method must be 'mad' or 'percentile'")
+
+    keep = dists <= thr
+
+    if verbose:
+        print(f"DTW: kept {int(keep.sum())}/{len(keep)}, dropped {int((~keep).sum())}, threshold={thr:.3f}")
+
+    return dists, thr, keep
 def expand_drop_to_clusters(df, bad_mask, group_col="name", time_col="Time_Stamp", seconds=10):
     """
     Expand per-row 'bad' mask to include any rows within ±seconds
