@@ -574,7 +574,7 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, m
     if df is None or len(df) == 0:
         raise ValueError("Input dataframe is empty")
 
-    print("\Computing timestamps")
+    print("\nComputing timestamps")
     print("-"*20)
     df = normalize_time_columns(df)
     
@@ -605,7 +605,7 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, m
     df_clean, outlier_info = iqr_outlier_filter_grouped(stacked_df, "clayBody", ["geom_fv", "fluctuation_fv"], verbose=True)
 
 
-    print("\Balancing")
+    print("\nBalancing")
     df_clean = balancing_function(df_clean, TARGET, True)
 
     return df_clean, _
