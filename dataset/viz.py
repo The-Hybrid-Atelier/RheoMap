@@ -55,54 +55,122 @@ def plot_lines_by_condition(df, pulse_col, condition_col):
     fig.tight_layout()
     return fig, ax 
 
-def plot_pulse_by_name_sns(dataframe, target="name"):
-    unique_materials = dataframe[target].unique().copy()
 
-    for material in unique_materials:
-        # Filter for this material only
-        material_data = dataframe[dataframe[target] == material].reset_index()#assigns index as a column now
+def plot_pulse_by_name_sns(
+        df, 
+        target="name",
+        mode="each",          
+        scale=1000.0,         
+        figsize=(8, 4),
+        linewidth=4,
+        alpha=0.9,
+        font_scale=1):
+    """
+    High-quality research visualization for REP pulses with two modes:
+        - each: plot each pulse individually
+        - mean: plot mean curve (+/- SE)
+    """
 
-        # Explode data into long-form
+    sns.set(style="whitegrid")
+    sns.set_context("talk", font_scale=font_scale)
+
+    unique_groups = df[target].unique()
+
+    for group in unique_groups:
+        group_df = df[df[target] == group].reset_index(drop=True)
+
+        # ---- Explode pulses into long format ----
         long_df = (
-            material_data[['index', 'data']]
-            .explode('data')
-            .assign(time_idx=lambda d: d.groupby('index').cumcount())  # x-axis
-            #each element as its own row,same list means same index number.
-            #but now the index of each element is distinguished by time_idx.
-            .rename(columns={'index': 'trial'})
+            group_df
+            .reset_index()
+            .rename(columns={"index": "trial"})
+            .explode("data")
+            .assign(
+                time_idx=lambda d: d.groupby("trial").cumcount(),
+                data=lambda d: d["data"].astype(float) / scale
+            )
         )
-        long_df['data'] = long_df['data'] / 1000  # Convert Pa to kPa
 
-        # Plot using seaborn
-        from matplotlib.cm import get_cmap
-        from matplotlib.colors import to_hex,LinearSegmentedColormap
-
-        unique_trials = long_df['trial'].unique()
+        # ---- Choose a nicer ordinal palette ----
+        unique_trials = long_df["trial"].unique()
         num_trials = len(unique_trials)
 
-        # Define red → yellow → blue colormap
-        tricolor_cmap = LinearSegmentedColormap.from_list("red_yellow_blue", ["#ff0000", "#ffff00", "#0000ff"], N=num_trials)
-        colors = [to_hex(tricolor_cmap(i / (num_trials - 1))) for i in range(num_trials)]
+        # Smooth sequential palette for ordinal trial values
+        palette = sns.color_palette("crest", n_colors=num_trials)
 
-        # Create palette mapping
-        palette = dict(zip(unique_trials, colors))
+        # ---- Plot ----
+        fig, ax = plt.subplots(figsize=figsize)
 
-        # Plot
-        plt.figure(figsize=(12, 6))
-        sns.lineplot(
-            data=long_df,
-            x='time_idx',
-            y='data',
-            hue='trial',
-            palette=palette,
-            linewidth=1.5,
-            alpha=0.9,
-            hue_order=unique_trials
-        )
-        plt.title(f"Pulses for Material: {material}")
-        plt.xlabel("Discrete-Time, index (n)")
-        plt.ylabel("Pulse Value (KPa)")
-        plt.legend(title='Trial', bbox_to_anchor=(1.15, 1), loc='upper left')
-        plt.figure(figsize=(14, 8))  # more space for layout
-        plt.tight_layout()
+        if mode == "each":
+            sns.lineplot(
+                data=long_df,
+                x="time_idx",
+                y="data",
+                hue="trial",
+                linewidth=linewidth,
+                alpha=alpha,
+                ax=ax,
+                palette=palette,
+                hue_order=unique_trials
+            )
+            ax.set_title(f"Pulses for: {group}", fontsize=20)
+
+        elif mode == "mean":
+            stats = (
+                long_df
+                .groupby("time_idx")["data"]
+                .agg(["mean", "sem"])
+                .reset_index()
+            )
+
+            # SE band
+            ax.fill_between(
+                stats["time_idx"],
+                stats["mean"] - stats["sem"],
+                stats["mean"] + stats["sem"],
+                color="tab:blue",
+                alpha=0.25,
+                linewidth=0
+            )
+
+            sns.lineplot(
+                data=stats,
+                x="time_idx",
+                y="mean",
+                linewidth=linewidth + 1.5,
+                color="tab:blue",
+                ax=ax
+            )
+            ax.set_title(f"Mean Pulse (±SE) for: {group}", fontsize=20)
+
+        else:
+            raise ValueError("mode must be 'each' or 'mean'")
+
+        # ---- Labels and styling ----
+        ax.set_xlabel("Discrete Time Index (n)", fontsize=18)
+        ax.set_ylabel("Air Pressure (kPa)", fontsize=18)
+
+        ax.tick_params(labelsize=14)
+        ax.grid(True, alpha=0.25)
+
+        # ---- Always put legend to the right ----
+        if mode == "each":
+            ax.legend(
+                title="Trial",
+                fontsize=12,
+                title_fontsize=14,
+                bbox_to_anchor=(1.02, 1),
+                loc="upper left",
+                borderaxespad=0.0
+            )
+        else:
+            ax.legend(
+                ["Mean ± SE"],
+                fontsize=12,
+                bbox_to_anchor=(1.02, 1),
+                loc="upper left",
+                borderaxespad=0.0
+            )
+
+        fig.tight_layout()
         plt.show()
