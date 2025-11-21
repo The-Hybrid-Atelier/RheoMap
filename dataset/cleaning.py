@@ -1,14 +1,15 @@
-import pandas as pd
+# cleaning.py
 import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-from scipy.signal import medfilt
-import pywt
+import pandas as pd
 from datetime import datetime
 from fastdtw import fastdtw
 from sklearn.metrics.pairwise import cosine_distances
-import warnings
 from sklearn.utils import resample
+import warnings
+
+# Import only what you need from rep and viz
+from rep import filter_pulse, extract_features, extract_features_nocv
+from viz import plot_pulse_by_name_sns, plot_lines_by_condition
 
 warnings.filterwarnings('ignore')
 
