@@ -112,68 +112,76 @@ def stack_column(values):
     return np.array(values, dtype=object)
 
 
-def generate_stacked_dataset_triplets(df, k=3, group_cols=('name', 'clayBody'), include_weight=False):
+def stackify(df, k=3, group_cols=("clayBody",), feature_source_col="vuong_sv",
+             extract_geom=True, extract_fluct=True):
     """
-    Groups by `group_cols`, splits into triplets of size k, and stacks
-    all remaining columns automatically.
+    Generalized k-stacking function.
 
-    Array-like columns are stacked with vstack.
-    Numeric scalar columns are averaged.
-    Other columns are kept as a length-k vector.
+    Groups by group_cols, forms windows of size k in order of timestamp,
+    stacks all non-group columns automatically, then optionally extracts
+    geometric and fluctuation features.
+
+    Args:
+        df : cleaned dataframe with feature_source_col already computed
+        k : window size
+        group_cols : tuple of columns used to form groups
+        feature_source_col : column containing pulse vectors to extract features from
+        extract_geom : extract geom features using extract_features_nocv
+        extract_fluct : extract fluctuation features using extract_features_nocv
+
+    Returns:
+        stacked_df : k-stacked dataframe with *_stack and feature columns
     """
-    print(f"Original dataset has {len(df)} rows.")
 
     df = df.copy()
-    out = []
+    print(f"Stackify: input rows = {len(df)}, grouping by {group_cols}, k={k}")
 
-    # All columns except group cols
+    # Identify data columns (everything not used for grouping)
     data_cols = [c for c in df.columns if c not in group_cols]
 
+    out_rows = []
+
+    # Group by the group_cols
     for gvals, g in df.groupby(list(group_cols), sort=False):
-        g = g.reset_index(drop=True)
-        num_triplets = len(g) // k
+        g = g.sort_values("time_stamp").reset_index(drop=True)
 
-        for i in range(num_triplets):
-            trip = g.iloc[i*k:(i+1)*k]
+        num_windows = len(g) // k
+        for i in range(num_windows):
+            block = g.iloc[i*k:(i+1)*k]
 
-            # Base row with group column values
             row = {col: val for col, val in zip(group_cols, gvals)}
 
+            # Stack each data column
             for col in data_cols:
-                values = trip[col].to_list()
-                stacked_val = stack_column(values)
-                row[f"{col}_stack"] = stacked_val
+                vals = block[col].tolist()
+                row[f"{col}_stack"] = stack_column(vals)
 
-            out.append(row)
+            out_rows.append(row)
 
-    new_df = pd.DataFrame(out)
-    print(f"New dataset has {len(new_df)} triplets after stacking.")
-    return new_df
+    stacked_df = pd.DataFrame(out_rows)
+    print(f"Stackify: produced {len(stacked_df)} stacked rows")
 
+    # Feature extraction
+    if extract_geom:
+        stacked_df["geom_fv"] = stacked_df[f"{feature_source_col}_stack"].apply(
+            lambda x: extract_features_nocv(x, "vuong")
+        )
 
-def triplets_extract_features(df_clean_filt, k=3, group_cols=["name", "clayBody"],include_weight=False):
+    if extract_fluct:
+        stacked_df["fluctuation_fv"] = stacked_df[f"{feature_source_col}_stack"].apply(
+            lambda x: extract_features_nocv(x, "matnoise")
+        )
 
-    stacked_df = generate_stacked_dataset_triplets(df_clean_filt, k=k, group_cols=group_cols, include_weight=include_weight)
-
-        
-    # 1. Apply both feature extraction functions first
-    stacked_df['vuong_fv'] = stacked_df['vuong_sv_stack'].apply(
-        lambda x: extract_features_nocv(x, "vuong")
-    )
-
-    stacked_df['matnoise_fv'] = stacked_df['vuong_sv_stack'].apply(
-        lambda x: extract_features_nocv(x, "matnoise")
-    )
-
-    # # 3. Now it's safe to check shapes
-    stacked_df['vuong_fv'][0].shape, stacked_df['matnoise_fv'][0].shape
-
-    # Suppose your feature column is named "matnoise_fv" and stores arrays
-    has_nan = stacked_df["matnoise_fv"].apply(lambda arr: np.isnan(arr).any())
-
-    print("Rows with NaN in matnoise_fv:", has_nan.sum())
+    # Diagnostics
+    if extract_fluct:
+        num_nan = stacked_df["fluctuation_fv"].apply(lambda arr: np.isnan(arr).any()).sum()
+        print(f"Stackify: fluctuation_fv rows with NaN = {num_nan}")
 
     return stacked_df
+
+
+
+
 
 
 def iqr_outlier_filter_grouped(df, group_col, colnames, verbose=True):
@@ -491,12 +499,6 @@ def extract_all_features(df):
     df['vuong_sv'] = df['data'].apply(extract_features)
     return df
 
-def stack_triplets(df, TARGET):
-    if 'clayBody' not in df.columns:
-        raise ValueError("'clayBody' is required for stacking")
-        
-    return triplets_extract_features(df, group_cols=["clayBody", TARGET], include_weight=False)
-
 
 
 
@@ -605,7 +607,12 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, b
     
     print("\nStacking")
     print("-"*20)
-    stacked_df = stack_triplets(df, TARGET)
+    stacked_df = stackify(
+        df,
+        k=3,
+        group_cols=("clayBody", TARGET),
+        feature_source_col="vuong_sv"
+    )
     stacked_df = finalize_generic_target(stacked_df)
 
 
