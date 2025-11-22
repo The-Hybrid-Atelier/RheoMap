@@ -498,59 +498,67 @@ def stack_triplets(df, TARGET):
     return triplets_extract_features(df, group_cols=["clayBody", TARGET], include_weight=False)
 
 
-def balancing_function(df, TARGET, df_balancing=False, min_class_size=10):
-    """
-    Class filtering + balancing helper.
 
-    - If df_balancing == False:
-        -> just print class counts and return df unchanged.
-    - If df_balancing == True:
-        -> drop classes with < min_class_size samples and
-           downsample all remaining classes to the same size.
+
+def balancing_function(df, target, df_balancing=False, min_class_size=10,
+                       n_bins=10, bin_strategy="quantile"):
     """
-    # Decide which label column we use
-    label_col = TARGET
-    # if TARGET == "clayBody":
-    #     label_col = "clayBody"
-    # elif TARGET == "water_added":
-    #     label_col = "name"
-    # else:
-    #     print(f"[INFO] TARGET='{TARGET}' not recognized → no filtering/balancing applied.")
-    #     return df.reset_index(drop=True)
+    Balancing helper for continuous float target.
+
+    Behavior:
+    - Converts TARGET into discrete bins.
+    - If df_balancing=False:
+        -> prints bin counts and returns df unchanged.
+    - If df_balancing=True:
+        -> removes bins with < min_class_size samples,
+           down-samples all remaining bins to the same size.
+    """
 
     df = df.copy()
-    df[label_col] = df[label_col].astype(str)
 
-    class_counts = df[label_col].value_counts()
-    print("\n=== Class counts ===")
+    # -----------------------------------------------
+    # 1. Create bins from the continuous target
+    # -----------------------------------------------
+    if bin_strategy == "uniform":
+        df["label_bin"] = pd.cut(df[target], bins=n_bins)
+    else:  # quantile-based (equal-sized bins)
+        df["label_bin"] = pd.qcut(df[target], q=n_bins, duplicates="drop")
+
+    label_col = "label_bin"
+
+    class_counts = df[label_col].value_counts().sort_index()
+    print("\n=== Bin counts ===")
     print(class_counts)
 
     # -------------------------------------------------
-    # 1) No balancing requested → do NOTHING else
+    # 2) No balancing requested → return as is
     # -------------------------------------------------
     if not df_balancing:
-        print("\n[INFO] df_balancing=False → no class filtering or balancing applied.")
+        print("\n[INFO] df_balancing=False → no filtering or balancing applied.")
         return df.reset_index(drop=True)
 
     # -------------------------------------------------
-    # 2) Balancing requested → filter rare classes, then balance
+    # 3) Filter bins that do not meet min_class_size
     # -------------------------------------------------
-    valid_classes = class_counts[class_counts >= min_class_size].index.tolist()
-    dropped = set(class_counts.index) - set(valid_classes)
+    valid_bins = class_counts[class_counts >= min_class_size].index.tolist()
+    dropped = set(class_counts.index) - set(valid_bins)
 
-    print(f"\nDropping classes with < {min_class_size} samples: {dropped}")
+    print(f"\nDropping bins with < {min_class_size} samples:")
+    print(dropped)
 
-    df_filtered = df[df[label_col].isin(valid_classes)].copy()
+    df_filtered = df[df[label_col].isin(valid_bins)].copy()
 
-    print("\n=== Class counts after filtering ===")
-    print(df_filtered[label_col].value_counts())
+    print("\n=== Bin counts after filtering ===")
+    print(df_filtered[label_col].value_counts().sort_index())
 
-    # If fewer than 2 classes remain, no balancing possible
-    if len(valid_classes) < 2:
-        print("\n[WARNING] <2 remaining valid classes → returning filtered dataset only (no balancing).")
+    # If fewer than 2 bins remain, no balancing possible
+    if len(valid_bins) < 2:
+        print("\n[WARNING] <2 valid bins → returning filtered dataset only.")
         return df_filtered.reset_index(drop=True)
 
-    # Downsample all remaining classes to the same size
+    # -------------------------------------------------
+    # 4) Uniform sampling across bins
+    # -------------------------------------------------
     min_size = df_filtered[label_col].value_counts().min()
     balanced_chunks = []
 
@@ -565,10 +573,11 @@ def balancing_function(df, TARGET, df_balancing=False, min_class_size=10):
 
     df_balanced = pd.concat(balanced_chunks).reset_index(drop=True)
 
-    print("\n=== Class counts after balancing ===")
-    print(df_balanced[label_col].value_counts())
+    print("\n=== Bin counts after balancing ===")
+    print(df_balanced[label_col].value_counts().sort_index())
 
     return df_balanced
+
 
 def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, min_class_size=10):
     if df is None or len(df) == 0:
@@ -606,6 +615,12 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, m
 
 
     print("\nBalancing")
-    df_clean = balancing_function(df_clean, TARGET, True)
+    df_clean = balancing_function(
+        df_clean,
+        target=TARGET,
+        df_balancing=df_balancing,
+        n_bins=5,
+        bin_strategy="uniform"
+    )
 
     return df_clean, _
