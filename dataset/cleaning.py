@@ -579,7 +579,7 @@ def balancing_function(df, target, df_balancing=False, min_class_size=10,
     return df_balanced
 
 
-def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, min_class_size=10):
+def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, bins=5, bin_strategy="uniform"):
     if df is None or len(df) == 0:
         raise ValueError("Input dataframe is empty")
 
@@ -619,8 +619,8 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, m
         df_clean,
         target=TARGET,
         df_balancing=df_balancing,
-        n_bins=5,
-        bin_strategy="uniform"
+        n_bins=bins,
+        bin_strategy=bin_strategy
     )
 
     return df_clean, _
