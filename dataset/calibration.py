@@ -4,6 +4,10 @@ import numpy as np
 import pickle
 from pathlib import Path
 
+class FastDTWCalibratorMulti:
+    pass   # will be overwritten by your real class if needed
+
+
 def load_default_calibrator():
     p = Path(__file__).parent / "calibrator.pkl"
     with open(p, "rb") as f:
