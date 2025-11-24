@@ -2,6 +2,11 @@ from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
 import numpy as np
 
+def load_default_calibrator():
+    p = Path(__file__).parent / "calibrator.pkl"
+    with open(p, "rb") as f:
+        return pickle.load(f)
+        
 def to_1d(x):
     x = np.array(x, dtype=float)
     x = np.squeeze(x)
@@ -96,7 +101,4 @@ class FastDTWCalibratorMulti:
         warped = fastdtw_warp(self.train_template, x)
         calibrated = self.scale_mean * warped
         return calibrated
-def load_default_calibrator():
-    p = Path(__file__).parent / "calibrator.pkl"
-    with open(p, "rb") as f:
-        return pickle.load(f)
+
