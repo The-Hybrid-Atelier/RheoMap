@@ -96,3 +96,7 @@ class FastDTWCalibratorMulti:
         warped = fastdtw_warp(self.train_template, x)
         calibrated = self.scale_mean * warped
         return calibrated
+def load_default_calibrator():
+    p = Path(__file__).parent / "calibrator.pkl"
+    with open(p, "rb") as f:
+        return pickle.load(f)
