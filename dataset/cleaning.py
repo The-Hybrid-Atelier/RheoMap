@@ -580,8 +580,8 @@ def balance_continuous(
         target_size = int(bin_sizes.median())
 
     elif balancing_mode == "kde":
-        # KDE per bin, synthetic samples
-        pass
+        # KDE needs a target size. Use the max so all bins expand.
+        target_size = bin_sizes.max()
 
     else:
         raise ValueError(f"Unknown balancing_mode: {balancing_mode}")
