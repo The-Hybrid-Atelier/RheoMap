@@ -581,7 +581,7 @@ def balancing_function(df, target, df_balancing=False, min_class_size=10,
     return df_balanced
 
 
-def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, bins=5, bin_strategy="uniform"):
+def clean_data_master(df, TARGET, head=5, use_calibration = False, DTW_graph=False, df_balancing=False, bins=5, bin_strategy="uniform"):
     if df is None or len(df) == 0:
         raise ValueError("Input dataframe is empty")
 
@@ -592,6 +592,20 @@ def clean_data_master(df, TARGET, head=5, DTW_graph=False, df_balancing=False, b
     print("\nValidating REP Length")
     print("-"*20)
     df, _ = filter_by_rep_length(df)
+
+    if use_calibration:
+        print("\nApplying Global Calibration (Batch ≠ 1)")
+        print("-"*40)
+        calibrator = load_default_calibrator()
+    
+        df = df.copy()
+        for idx, row in df.iterrows():
+            if int(row["batch"]) != 1:
+                df.at[idx, "data"] = calibrator.apply(
+                    np.array(row["data"])
+                )
+    else:
+        print("\n(No calibration applied)")
 
     print("\nREP Outlier Detection (DTW x MAD)")
     print("-"*20)
