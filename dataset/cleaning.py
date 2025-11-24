@@ -10,6 +10,7 @@ import warnings
 # Import only what you need from rep and viz
 from rep import filter_pulse, extract_features, extract_features_nocv
 from viz import plot_pulse_by_name_sns, plot_lines_by_condition
+from .calibration import load_default_calibrator
 
 warnings.filterwarnings('ignore')
 
