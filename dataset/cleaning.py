@@ -503,83 +503,142 @@ def extract_all_features(df):
 
 
 
-def balancing_function(df, target, df_balancing=False, min_class_size=10,
-                       n_bins=10, bin_strategy="quantile"):
-    """
-    Balancing helper for continuous float target.
+from sklearn.model_selection import train_test_split
+from sklearn.utils import resample
+from imblearn.over_sampling import SMOTE
+from sklearn.neighbors import KernelDensity
+import numpy as np
+import pandas as pd
 
-    Behavior:
-    - Converts TARGET into discrete bins.
-    - If df_balancing=False:
-        -> prints bin counts and returns df unchanged.
-    - If df_balancing=True:
-        -> removes bins with < min_class_size samples,
-           down-samples all remaining bins to the same size.
+def balance_continuous(
+    df,
+    target,
+    df_balancing=False,
+    n_bins=10,
+    bin_strategy="quantile",
+    min_class_size=10,
+    balancing_mode="downsample",
+    kde_bandwidth=0.05
+):
+    """
+    Balancing helper for continuous targets using multiple strategies.
+
+    Modes:
+      downsample:     smallest bin sets the sample count for all bins
+      oversample:     largest bin sets the sample count for all bins
+      mixed:          bins below min_class_size are oversampled, others downsampled
+      kde:            synthetic samples generated per bin using KDE
+
+    Binning strategies:
+      uniform:   equal width bins
+      quantile:  equal count bins
     """
 
     df = df.copy()
 
-    # -----------------------------------------------
-    # 1. Create bins from the continuous target
-    # -----------------------------------------------
+    # ---------------------
+    # Create bins
+    # ---------------------
     if bin_strategy == "uniform":
         df["label_bin"] = pd.cut(df[target], bins=n_bins)
-    else:  # quantile-based (equal-sized bins)
+    else:
         df["label_bin"] = pd.qcut(df[target], q=n_bins, duplicates="drop")
 
     label_col = "label_bin"
 
-    class_counts = df[label_col].value_counts().sort_index()
-    print("\n=== Bin counts ===")
-    print(class_counts)
+    print("\n=== Bin counts (raw) ===")
+    print(df[label_col].value_counts().sort_index())
 
-    # -------------------------------------------------
-    # 2) No balancing requested → return as is
-    # -------------------------------------------------
     if not df_balancing:
-        print("\n[INFO] df_balancing=False → no filtering or balancing applied.")
+        print("\nBalancing disabled. Returning original dataframe.")
         return df.reset_index(drop=True)
 
-    # -------------------------------------------------
-    # 3) Filter bins that do not meet min_class_size
-    # -------------------------------------------------
-    valid_bins = class_counts[class_counts >= min_class_size].index.tolist()
-    dropped = set(class_counts.index) - set(valid_bins)
-
-    print(f"\nDropping bins with < {min_class_size} samples:")
-    print(dropped)
-
-    df_filtered = df[df[label_col].isin(valid_bins)].copy()
+    # ----------------------------
+    # Drop bins with few samples
+    # ----------------------------
+    counts = df[label_col].value_counts()
+    valid_bins = counts[counts >= min_class_size].index
+    df = df[df[label_col].isin(valid_bins)].copy()
 
     print("\n=== Bin counts after filtering ===")
-    print(df_filtered[label_col].value_counts().sort_index())
+    print(df[label_col].value_counts().sort_index())
 
-    # If fewer than 2 bins remain, no balancing possible
-    if len(valid_bins) < 2:
-        print("\n[WARNING] <2 valid bins → returning filtered dataset only.")
-        return df_filtered.reset_index(drop=True)
+    # ----------------------------
+    # Compute bin sizes for strategy
+    # ----------------------------
+    bin_sizes = df[label_col].value_counts()
 
-    # -------------------------------------------------
-    # 4) Uniform sampling across bins
-    # -------------------------------------------------
-    min_size = df_filtered[label_col].value_counts().min()
-    balanced_chunks = []
+    if balancing_mode == "downsample":
+        target_size = bin_sizes.min()
 
-    for lbl, subset in df_filtered.groupby(label_col):
-        subset_bal = resample(
-            subset,
-            replace=False,
-            n_samples=min_size,
-            random_state=42
-        )
-        balanced_chunks.append(subset_bal)
+    elif balancing_mode == "oversample":
+        target_size = bin_sizes.max()
 
-    df_balanced = pd.concat(balanced_chunks).reset_index(drop=True)
+    elif balancing_mode == "mixed":
+        # small bins are oversampled, large bins are downsampled
+        # target size is median
+        target_size = int(bin_sizes.median())
 
-    print("\n=== Bin counts after balancing ===")
-    print(df_balanced[label_col].value_counts().sort_index())
+    elif balancing_mode == "kde":
+        # KDE per bin, synthetic samples
+        pass
 
-    return df_balanced
+    else:
+        raise ValueError(f"Unknown balancing_mode: {balancing_mode}")
+
+    # ----------------------------
+    # Perform balancing
+    # ----------------------------
+    balanced_parts = []
+
+    for bin_label, subset in df.groupby(label_col):
+
+        count = len(subset)
+
+        # -------------------------------------
+        # Downsample
+        # -------------------------------------
+        if balancing_mode == "downsample":
+            part = resample(subset, replace=False, n_samples=target_size, random_state=42)
+
+        # -------------------------------------
+        # Oversample (repeat or synthetic)
+        # -------------------------------------
+        elif balancing_mode == "oversample":
+            if count >= target_size:
+                part = subset.sample(target_size, replace=False, random_state=42)
+            else:
+                part = resample(subset, replace=True, n_samples=target_size, random_state=42)
+
+        # -------------------------------------
+        # Mixed strategy
+        # -------------------------------------
+        elif balancing_mode == "mixed":
+            if count > target_size:
+                part = subset.sample(target_size, replace=False, random_state=42)
+            else:
+                part = resample(subset, replace=True, n_samples=target_size, random_state=42)
+
+        # -------------------------------------
+        # KDE resampling
+        # -------------------------------------
+        elif balancing_mode == "kde":
+            vals = subset[target].values.reshape(-1, 1)
+            kde = KernelDensity(kernel="gaussian", bandwidth=kde_bandwidth).fit(vals)
+            synthetic = kde.sample(target_size)
+            synthetic_df = subset.sample(target_size, replace=True).copy()
+            synthetic_df[target] = synthetic[:, 0]
+            part = synthetic_df
+
+        balanced_parts.append(part)
+
+    out = pd.concat(balanced_parts).reset_index(drop=True)
+
+    print("\n=== Final bin counts ===")
+    print(out[label_col].value_counts().sort_index())
+
+    return out
+
 
 
 def clean_data_master(df, TARGET, head=5, use_calibration = False, DTW_graph=False, df_balancing=False, bins=5, bin_strategy="uniform"):
