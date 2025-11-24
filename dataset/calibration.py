@@ -1,6 +1,8 @@
 from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
 import numpy as np
+import pickle
+from pathlib import Path
 
 def load_default_calibrator():
     p = Path(__file__).parent / "calibrator.pkl"
