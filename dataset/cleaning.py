@@ -681,7 +681,7 @@ def clean_data_master(df, TARGET, head=5, use_calibration = False, DTW_graph=Fal
     
     print("\nStacking")
     print("-"*20)
-    stacked_df = cleaning.stackify(
+    stacked_df = stackify(
         df,
         k=3,
         group_cols=("clayBody", "batch", TARGET),
