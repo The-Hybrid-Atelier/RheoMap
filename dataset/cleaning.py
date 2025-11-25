@@ -647,16 +647,16 @@ def clean_data_master(df, TARGET, head=5, use_calibration = False, DTW_graph=Fal
 
     print("\nComputing timestamps")
     print("-"*20)
-    df = cleaning.normalize_time_columns(df)
+    df = normalize_time_columns(df)
     
     print("\nValidating REP Length")
     print("-"*20)
-    df, _ = cleaning.filter_by_rep_length(df)
+    df, _ = filter_by_rep_length(df)
     
     if use_calibration:
         print("\nApplying Global Calibration (Batch ≠ 2)")
         print("-"*40)
-        calibrator = cleaning.load_default_calibrator()
+        calibrator = load_default_calibrator()
     
         df = df.copy()
         for idx, row in df.iterrows():
@@ -669,15 +669,15 @@ def clean_data_master(df, TARGET, head=5, use_calibration = False, DTW_graph=Fal
     
     print("\nREP Outlier Detection (DTW x MAD)")
     print("-"*20)
-    df = cleaning.filter_dtw_outliers(df, DTW_graph=DTW_graph, target=TARGET)
+    df = filter_dtw_outliers(df, DTW_graph=DTW_graph, target=TARGET)
     
     print("\nValidate REP Length # 2")
     print("-"*20)
-    df, _= cleaning.harmonize_arrays(df, expected_len=22)
+    df, _= harmonize_arrays(df, expected_len=22)
     
     print("\nExtracting Features")
     print("-"*20)
-    df = cleaning.extract_all_features(df)
+    df = extract_all_features(df)
     
     print("\nStacking")
     print("-"*20)
@@ -687,16 +687,16 @@ def clean_data_master(df, TARGET, head=5, use_calibration = False, DTW_graph=Fal
         group_cols=("clayBody", "batch", TARGET),
         feature_source_col="vuong_sv"
     )
-    stacked_df = cleaning.finalize_generic_target(stacked_df)
+    stacked_df = finalize_generic_target(stacked_df)
     
     
     print("\nFluctuation Feature Outlier Detection")
     print("-"*20)
-    df_clean, outlier_info = cleaning.iqr_outlier_filter_grouped(stacked_df, "clayBody", ["geom_fv", "fluctuation_fv"], verbose=True)
+    df_clean, outlier_info = iqr_outlier_filter_grouped(stacked_df, "clayBody", ["geom_fv", "fluctuation_fv"], verbose=True)
     
     
     print("\nBalancing")
-    df_clean = cleaning.balance_continuous(
+    df_clean = balance_continuous(
         df_clean, TARGET,
         balancing_mode=balancing_mode, # downsample, oversample, kde
         df_balancing=df_balancing,
