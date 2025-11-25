@@ -643,65 +643,67 @@ def balance_continuous(
 
 def clean_data_master(df, TARGET, head=5, use_calibration = False, DTW_graph=False, df_balancing=False, bins=5, bin_strategy="uniform"):
     if df is None or len(df) == 0:
-        raise ValueError("Input dataframe is empty")
+    raise ValueError("Input dataframe is empty")
 
     print("\nComputing timestamps")
     print("-"*20)
-    df = normalize_time_columns(df)
+    df = cleaning.normalize_time_columns(df)
     
     print("\nValidating REP Length")
     print("-"*20)
-    df, _ = filter_by_rep_length(df)
-
+    df, _ = cleaning.filter_by_rep_length(df)
+    
     if use_calibration:
-        print("\nApplying Global Calibration (Batch ≠ 1)")
+        print("\nApplying Global Calibration (Batch ≠ 2)")
         print("-"*40)
-        calibrator = load_default_calibrator()
+        calibrator = cleaning.load_default_calibrator()
     
         df = df.copy()
         for idx, row in df.iterrows():
-            if int(row["batch"]) != 1:
-                df.at[idx, "data"] = calibrator.apply(
+            if int(row["batch"]) != 2:
+                df.at[idx, "data"] = calibrator.calibrate(
                     np.array(row["data"])
                 )
     else:
         print("\n(No calibration applied)")
-
+    
     print("\nREP Outlier Detection (DTW x MAD)")
     print("-"*20)
-    df = filter_dtw_outliers(df, DTW_graph=DTW_graph, target=TARGET)
+    df = cleaning.filter_dtw_outliers(df, DTW_graph=DTW_graph, target=TARGET)
     
     print("\nValidate REP Length # 2")
     print("-"*20)
-    df, _= harmonize_arrays(df, expected_len=22)
+    df, _= cleaning.harmonize_arrays(df, expected_len=22)
     
     print("\nExtracting Features")
     print("-"*20)
-    df = extract_all_features(df)
+    df = cleaning.extract_all_features(df)
     
     print("\nStacking")
     print("-"*20)
-    stacked_df = stackify(
+    stacked_df = cleaning.stackify(
         df,
         k=3,
-        group_cols=("clayBody", TARGET),
+        group_cols=("clayBody", "batch", TARGET),
         feature_source_col="vuong_sv"
     )
-    stacked_df = finalize_generic_target(stacked_df)
-
-
+    stacked_df = cleaning.finalize_generic_target(stacked_df)
+    
+    
     print("\nFluctuation Feature Outlier Detection")
     print("-"*20)
-    df_clean, outlier_info = iqr_outlier_filter_grouped(stacked_df, "clayBody", ["geom_fv", "fluctuation_fv"], verbose=True)
-
-
+    df_clean, outlier_info = cleaning.iqr_outlier_filter_grouped(stacked_df, "clayBody", ["geom_fv", "fluctuation_fv"], verbose=True)
+    
+    
     print("\nBalancing")
-    df_clean = balancing_function(
-        df_clean,
-        target=TARGET,
+    df_clean = cleaning.balance_continuous(
+        df_clean, TARGET,
+        balancing_mode=balancing_mode, # downsample, oversample, kde
         df_balancing=df_balancing,
         n_bins=bins,
-        bin_strategy=bin_strategy
+        bin_strategy=bin_strategy,
+        min_class_size=10,
+        kde_bandwidth=0.05
     )
 
     return df_clean, _
