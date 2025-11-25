@@ -643,7 +643,7 @@ def balance_continuous(
 
 def clean_data_master(df, TARGET, head=5, use_calibration = False, DTW_graph=False, df_balancing=False, bins=5, bin_strategy="uniform"):
     if df is None or len(df) == 0:
-    raise ValueError("Input dataframe is empty")
+        raise ValueError("Input dataframe is empty")
 
     print("\nComputing timestamps")
     print("-"*20)
